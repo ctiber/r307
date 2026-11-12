@@ -4,22 +4,10 @@
 
 ```
 cours/ch1_jdbc … ch7_plpgsql     diapos (beamer), un dossier par chapitre ; code/ et img/ éventuels
-tp/tp1_jdbc … tp6_plpgsql         sujets de TP ; code/ fourni aux étudiants ; correction/ (non publié)
-quiz/quiz1, quiz/quiz2           questions Moodle (XML, non publié)
+tp/tp1_jdbc … tp6_plpgsql         sujets de TP ; code/ fourni
 latex/common/                    préambules communs (diapos, TP) et logos
 docs/                            plan prévisionnel (plan_cours.odt/.pdf)
-archive/2025-2026/               supports de l'an dernier et fichiers retirés (non publié)
 ```
-
-Le dépôt est **public** : les dossiers `tp/*/correction/`, `quiz/` et `archive/` sont ignorés par Git.
-Une correction est publiée à la fin des séances du TP, en forçant son ajout :
-
-```
-git add -f tp/tp1_jdbc/correction/
-git commit -m "Correction du TP1"
-```
-
-Une fois ajoutée, elle est suivie normalement (les modifications suivantes se commitent sans `-f`).
 
 Chaque support se compile depuis son dossier, par exemple :
 
@@ -64,13 +52,13 @@ Chapitres : 1 JDBC · 2 Transactions et concurrence · 3 Index et optimisation �
 | 8 | 8 | 8 | 49 | TP2 (3/3) : concurrence d'accès (psql à deux terminaux, puis Java) | tp/tp2_transactions |
 | 9 | — | 9 | 49 | Gr A et C : Ch. 3 Index (30 min) + TP3 Index (1 h) | cours/ch3_index, tp/tp3_index |
 | 10 | 9 | 10 | 50 (07/12) | Ch. 4 JPA | cours/ch4_jpa |
-| 11 | 10 | 11 | 50 | **Quiz 1** (15 min) + Ch. 5 DAO/DTO (30 min) + début TP4 | quiz/quiz1, cours/ch5_dao_dto, tp/tp4_jpa_dao_dto |
+| 11 | 10 | 11 | 50 | **Quiz 1** (15 min) + Ch. 5 DAO/DTO (30 min) + début TP4 | cours/ch5_dao_dto, tp/tp4_jpa_dao_dto |
 | — | 11 | — | 51 (14/12) | Gr B : Ch. 3 Index (30 min) + TP3 Index (1 h) | cours/ch3_index, tp/tp3_index |
 | 12 | 12 | 12 (sem. 50) | 51 | TP4 (2/3) : entités Client/Compte/Operation + DAO | tp/tp4_jpa_dao_dto |
 | 13 | 13 | 13 | 51 | TP4 (3/3) : DTO, service, tests + rendu (bonus N+1) | tp/tp4_jpa_dao_dto |
 | 14 | 14 | 14 | 51 | Ch. 6 Repository et Spring Data (45 min) + début TP5 | cours/ch6_spring_data, tp/tp5_repository |
 | 15 | 15 | 15 | 51 | TP5 Repository | tp/tp5_repository |
-| 16 | 16 | 16 | 02 (04/01) | **Quiz 2** (15 min) + Ch. 7 Procédures stockées, curseurs, exceptions, triggers | quiz/quiz2, cours/ch7_plpgsql |
+| 16 | 16 | 16 | 02 (04/01) | **Quiz 2** (15 min) + Ch. 7 Procédures stockées, curseurs, exceptions, triggers | cours/ch7_plpgsql |
 | 17 | 17 | 17 | 02 | TP6 (1/2) : virement (exceptions, appel JDBC), curseurs | tp/tp6_plpgsql |
 | 18 | 18 | 18 | 02 | TP6 (2/2) : triggers + rendu final | tp/tp6_plpgsql |
 
