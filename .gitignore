@@ -20,7 +20,8 @@ archive/
 _minted*/
 *.pdf
 !docs/*.pdf
-!archive/**/*.pdf
+!cours/*/*.pdf
+!tp/*/*.pdf
 
 # Java / IDE
 target/
