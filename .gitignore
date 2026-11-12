@@ -1,0 +1,35 @@
+# Contenus NON publiés (dépôt public) : corrections, quiz et archives.
+# Pour publier une correction après la séance : git add -f tp/tpX_.../correction/
+tp/*/correction/
+quiz/
+archive/
+
+# LaTeX : fichiers générés
+*.aux
+*.log
+*.nav
+*.out
+*.snm
+*.toc
+*.vrb
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.listing
+*.pyg
+_minted*/
+*.pdf
+!docs/*.pdf
+!archive/**/*.pdf
+
+# Java / IDE
+target/
+*.class
+.idea/
+*.iml
+dependency-reduced-pom.xml
+
+# Divers
+*~
+*.bak
+.DS_Store

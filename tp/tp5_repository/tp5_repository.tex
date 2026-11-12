@@ -1,0 +1,148 @@
+\documentclass[11pt]{article}
+\input{../../latex/common/r307-tp-preamble.tex}
+\graphicspath{{../../latex/common/assets/}{./}}
+
+
+\begin{document}
+\rtpheader{5}{Patron Repository (suite JDBC et JPA)}
+\section*{Contexte}
+
+Lors des TP précédents, vous avez développé une application bancaire en plusieurs étapes :
+\begin{itemize}
+    \item accès à la base de données via \textbf{JDBC} (DAO, requêtes SQL explicites) ;
+    \item migration vers \textbf{JPA} avec des entités persistantes et un \texttt{EntityManager}.
+\end{itemize}
+
+Bien que JPA simplifie fortement l’accès aux données, le code métier reste encore
+\textbf{couplé à l’API JPA} (EntityManager, transactions, requêtes).
+
+Dans ce TP, vous allez introduire le \textbf{patron Repository}, dont l’objectif est de :
+\begin{itemize}
+    \item encapsuler totalement l’accès aux données ;
+    \item isoler la logique métier de la technologie de persistance ;
+    \item améliorer la testabilité et l’évolutivité de l’application.
+\end{itemize}
+
+Dans les frameworks modernes tels que \textbf{Spring Data JPA}, l’accès aux données
+repose sur le \textbf{patron Repository}.  Avec Spring Data :
+\begin{itemize}
+    \item le développeur définit uniquement des \textbf{interfaces Repository} ;
+    \item les méthodes CRUD sont fournies automatiquement ;
+    \item la logique métier ne dépend plus ni de SQL, ni de JPA.
+\end{itemize}
+
+Cependant, derrière cette automatisation, Spring Data repose sur une implémentation
+concrète du patron Repository, historiquement implémentée \textbf{manuellement}
+au-dessus de JPA.
+
+Dans ce TP, vous allez implémenter \textbf{manuellement un Repository en JPA},
+afin de comprendre les principes fondamentaux du patron Repository, avant son
+utilisation automatisée dans Spring Data.
+
+\bigskip
+
+\section{Différence DAO et Repository}
+
+Dans les pratiques modernes, le patron Repository remplace le DAO (\textit{Data Access Object}) mais il le généralise et l’élève à un niveau d’abstraction plus métier.
+
+Le \textbf{DAO} est né avec JDBC. Il est fortement lié au SQL, à la base de données et à la structure des tables. On définit dans une classe DAO des opérations souvent techniques : 
+\begin{verbatim}
+findClientById(int id)
+insertClient(Client c)
+updateClient(Client c)
+\end{verbatim}
+
+Une classe DAO représente une table.
+
+Le \textbf{Repository} est issu de la \textbf{conception pilotée par le domaine}\footnote{\url{https://martinfowler.com/bliki/DomainDrivenDesign.html}} (\textit{Domain-Driven Design} -- DDD). Une interface Repository représente une abstraction métier, pas technique. Elle manipule des agrégats métier. Elle cache complètement JPA, SQL et la base de données. Le Repository représente une collection d’objets métier.
+
+Dans certains cas rares, DAO et Repository coexistent. Des classes DAO contiennent alors des accès SQL très spécifiques pour des requêtes complexes ou pour viser un haut niveau de performance.
+
+%-------------------------------------------------
+\section*{Objectifs pédagogiques}
+
+À l’issue de ce TP, vous devrez être capables de :
+\begin{itemize}
+    \item comprendre le rôle du patron Repository ;
+    \item distinguer DAO, Repository et Service ;
+    \item concevoir une interface Repository indépendante de JPA ;
+    \item implémenter un Repository basé sur JPA ;
+    \item utiliser le Repository dans une couche service.
+\end{itemize}
+
+\bigskip
+
+%-------------------------------------------------
+\section*{Exercice -- Mise en place du patron Repository}
+
+On considère les entités JPA déjà développées lors du TP précédent, notamment :
+\begin{itemize}
+    \item \texttt{Client}
+    \item \texttt{Compte}
+\end{itemize}
+
+Les opérations courantes sur les clients sont :
+\begin{itemize}
+    \item création d’un client ;
+    \item recherche d’un client par identifiant ;
+    \item récupération de tous les comptes d’un client.
+\end{itemize}
+
+\subsection*{Travail demandé}
+
+Le code à l'intérieur des méthodes peut être généré par IA. Mais la structure globale du projet et les différentes interface et classes, ainsi que leurs dépendances doivent être créées à la main.
+
+\begin{enumerate}[label=\alph*)]
+    \item Définir une interface \texttt{ClientRepository} contenant les méthodes suivantes :
+    \begin{itemize}
+        \item \texttt{save(Client client)} ;
+        \item \texttt{findById(int id)} ;
+        \item \texttt{findAll()} ;
+        \item \texttt{findComptesByClient(int idClient)}.
+    \end{itemize}
+
+    \item Implémenter cette interface dans une classe
+    \texttt{ClientRepositoryJPA} utilisant un \texttt{EntityManager}.
+
+    \item Créer une classe \texttt{BanqueService} qui :
+    \begin{itemize}
+        \item dépend uniquement de l’interface \texttt{ClientRepository} ;
+        \item ne manipule jamais directement l’EntityManager.
+    \end{itemize}
+
+    \item Illustrer l’utilisation du service dans une classe \texttt{Main} :
+    \begin{itemize}
+        \item création d’un client ;
+        \item récupération de ses comptes.
+    \end{itemize}
+
+    \item Expliquer en quelques lignes :
+    \begin{itemize}
+        \item la différence entre DAO et Repository ;
+        \item les avantages du Repository par rapport à l’approche JPA directe.
+    \end{itemize}
+\end{enumerate}
+
+\bigskip
+
+%-------------------------------------------------
+\section*{Contraintes}
+
+\begin{itemize}
+    \item Les entités JPA ne doivent pas dépendre du Repository.
+    \item Le service métier ne doit pas dépendre de JPA.
+    \item Toute opération de persistance doit passer par un Repository.
+\end{itemize}
+
+\bigskip
+
+\section*{Rendu attendu}
+
+\begin{itemize}
+    \item Interfaces et implémentations du Repository ;
+    \item Classe service utilisant le Repository ;
+    \item Code clair et commenté ;
+    \item Réponses argumentées aux questions.
+\end{itemize}
+
+\end{document}

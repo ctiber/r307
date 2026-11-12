@@ -1,0 +1,890 @@
+\documentclass[aspectratio=169,10pt]{beamer}
+\input{../../latex/common/r307-slides-preamble.tex}
+\graphicspath{{../../latex/common/assets/}}
+
+% ---- Styles TikZ des figures du chapitre (palette de la charte) ----
+\tikzset{
+  jbox/.style={rectangle, rounded corners=3pt, draw=qamuted, thick, fill=qapanel,
+    text=qatext, font=\footnotesize\ttfamily, minimum height=0.6cm,
+    minimum width=2.5cm, align=center},
+  jacc/.style={jbox, draw=qaaccent},
+  jgold/.style={jbox, draw=qaaccent2},
+  jarrow/.style={-Stealth, thick, draw=qamuted},
+  jlbl/.style={font=\scriptsize\ttfamily, text=qamuted},
+  jdb/.style={cylinder, shape border rotate=90, aspect=0.25, draw=#1, thick,
+    fill=qapanelalt, text=qatext, minimum width=1.3cm, minimum height=1cm,
+    font=\scriptsize\sffamily, align=center},
+  jdb/.default=qaaccent,
+  jzone/.style={draw=qamuted, dashed, rounded corners=6pt, inner sep=7pt},
+  jcard/.style={rectangle, rounded corners=2pt, draw=qaline, thick, fill=qapanel,
+    text=qatext, font=\scriptsize\sffamily, align=center, text width=1.55cm,
+    inner sep=3pt},
+  jthread/.style={circle, draw=#1, very thick, fill=qapanel, text=qatext,
+    font=\scriptsize\sffamily, minimum size=0.55cm, inner sep=0pt},
+}
+
+
+\title{Interaction avec des sources de donn\'ees relationnelles avec JDBC}
+\author[C. Tibermacine]{Selena Lamari et Chouki Tibermacine}
+\date{}
+
+\begin{document}
+	
+	\rtitleslide{1}{Interaction avec des sources de donn\'ees relationnelles avec JDBC}
+
+% ----------------------------------------------------------------
+\begin{frame}{Plan pr\'evisionnel de la ressource (18 s\'eances de 1h30)}
+  \begin{datacard}
+    \scriptsize
+    \renewcommand{\arraystretch}{1.05}
+    \begin{tabular}{@{}lp{4.9cm}p{5.1cm}c@{}}
+      \toprule
+      \textbf{Sem.} & \textbf{Cours} & \textbf{TP} & \textbf{A / B / C}\\
+      \midrule
+      47 (16/11) & Ch.\,1 JDBC --- \emph{aujourd'hui} & TP1 JDBC : tables de base, CRUD (1/3, 2/3) & 3 / 3 / 3\\
+      48 (23/11) & Ch.\,2 Transactions et concurrence d'acc\`es & TP1 (3/3) + rendu, TP2 (1/3) & 3 / 3 / 3\\
+      49 (30/11) & Ch.\,3 Index et optimisation (Gr A, C) & TP2 (2/3, 3/3), TP3 Index (Gr A, C) & 3 / 2 / 3\\
+      50 (07/12) & Ch.\,4 JPA, \hl{Quiz 1}, Ch.\,5 DAO/DTO & TP4 JPA + DAO/DTO (1/3 ; Gr C : 2/3) & 2 / 2 / 3\\
+      51 (14/12) & Ch.\,6 Repository \& Spring Data ; Ch.\,3 (Gr B) & TP4 (2/3, 3/3) + rendu, TP5 ; TP3 Index (Gr B) & 4 / 5 / 3\\
+      02 (04/01) & \hl{Quiz 2}, Ch.\,7 Proc\'edures stock\'ees, curseurs, triggers & TP6 PL/pgSQL + rendu & 3 / 3 / 3\\
+      \bottomrule
+    \end{tabular}
+  \end{datacard}
+  \vspace{2mm}
+  {\small\color{qamuted} \'Evaluation : quiz + rendus de TP. On insiste d\`es le d\'ebut sur des \alert{rendus de qualit\'e} (d\'ep\^ot Git, README, code propre).}
+\end{frame}
+
+	
+%	\begin{frame}
+%		\frametitle{Plan de l'ECUE}
+%		\begin{enumerate}
+%			{	\footnotesize
+%				\item Programmation par objets en Python (Vincent Berry)
+%				\item Généricité paramétrique en Java (Marianne Huchard)
+%				\item Introspection et annotations en Java (Marianne Huchard)
+%				\item Conception d'architectures logicielles
+%				\item Construction de projets Java avec Maven	
+%				\item Modularisation des applications Java avec les modules et services Java 9+
+%				\item Développement d'applications multi-threadées en Java	
+%				\item Interaction avec des sources de données avec JDBC
+%				\item Développement d'applications à arch. distribuées avec \textit{Java Enterprise}		
+%				\item Amélioration de la conception d'applications grâce au refactoring
+%				\item Introduction à la programmation avec le langage Kotlin
+%				\item Programmation par objets en JavaScript
+%			}
+%		\end{enumerate}
+%	\end{frame}
+%	
+%	\begin{frame}
+%		\frametitle{Plan de l'ECUE}
+%		\begin{enumerate}
+%			{	\footnotesize
+%				{\color{gray}
+%					\item Programmation par objets en Python (Vincent Berry)
+%					\item Généricité paramétrique en Java (Marianne Huchard)
+%					\item Introspection et annotations en Java (Marianne Huchard)
+%					\item Conception d'architectures logicielles		
+%				\item Construction de projets Java avec Maven
+%					\item Modularisation des applications Java avec les modules et services Java 9+
+%					
+%					\item Développement d'applications multi-threadées en Java}
+%					\item Interaction avec des sources de données avec JDBC
+%					{\color{gray}						
+%					\item Développement d'applications à arch. distribuées avec \textit{Java Enterprise}					
+%					\item Amélioration de la conception d'applications grâce au refactoring
+%					\item Introduction à la programmation avec le langage Kotlin
+%					\item Programmation par objets en JavaScript}
+%			}
+%		\end{enumerate}
+%	\end{frame}
+
+
+\section{Introduction à JDBC}
+
+\begin{frame}{Introduction à JDBC}
+    \begin{block}{Définition}
+        \textbf{JDBC} (\textbf{Java Database Connectivity}) est une \textbf{API Java} standard qui permet aux applications Java d'interagir avec des bases de données relationnelles.
+    \end{block}
+
+    \begin{block}{À quoi ça sert ?}
+        \begin{itemize}
+            \item Établir une connexion entre une application Java et une base de données (MySQL, PostgreSQL, Oracle, etc.).
+            \item Exécuter des requêtes SQL (SELECT, INSERT, UPDATE, DELETE).
+            \item Récupérer et manipuler les résultats des requêtes.
+            \item Gérer les transactions.
+        \end{itemize}
+    \end{block}
+
+    
+\end{frame}
+
+
+\begin{frame}
+  \frametitle{Pourquoi utiliser JDBC ?}
+  \begin{itemize}
+    \item Indépendance vis-à-vis du SGBD (grâce aux \textbf{pilotes JDBC}).
+    \item Intégration native dans l'écosystème Java.
+    \item Support des fonctionnalités avancées (transactions, batch, métadonnées).
+    \item L'une des premières API pour app d'entreprise Java, toujours au c\oe ur de Java~:
+  \end{itemize}
+  \vspace{2mm}
+  \begin{center}
+  \begin{tikzpicture}[x=1.75cm]
+    \draw[qaline, line width=1.5pt] (-0.5,0) -- (7.5,0);
+    \foreach \i/\an/\v/\j/\dy/\anc in {
+        0/1997/JDBC 1.0/JDK 1.1/0.3/south,
+        1/1999/JDBC 2.1/J2SE 1.2/-0.3/north,
+        2/2001/JDBC 3.0/J2SE 1.4/0.3/south,
+        3/2006/JDBC 4.0/Java SE 6/-0.3/north,
+        4/2011/JDBC 4.1/Java SE 7/0.3/south,
+        5/2014/JDBC 4.2/Java SE 8/-0.3/north}{
+      \fill[qaaccent2] (\i,0) circle (3pt);
+      \draw[qaline, thick] (\i,0) -- (\i,\dy);
+      \node[jcard, anchor=\anc] at (\i,\dy)
+        {{\color{qaaccent2}\bfseries \an}\\ \v\\ {\color{qamuted}\j}};
+    }
+    \fill[qaaccent] (6,0) circle (3.5pt);
+    \draw[qaaccent, thick] (6,0) -- (6,0.3);
+    \node[jcard, draw=qaaccent, anchor=south] at (6,0.3)
+      {{\color{qaaccent}\bfseries 2017}\\ JDBC 4.3\\ {\color{qamuted}Java SE 9}\\ {\color{qaaccent}\scriptsize toujours actuelle}};
+  \end{tikzpicture}
+  \end{center}
+\end{frame}
+
+\begin{frame}
+  \frametitle{JDBC partout où Java interagit avec une BdD}
+  \begin{center}
+  \begin{tikzpicture}
+    \node[jbox, draw=qaaccent2, minimum width=2.0cm, minimum height=4.4cm,
+          font=\footnotesize\sffamily] (app) at (-1.2,0) {Application\\Java};
+    % ligne 1 : JDBC directement
+    \node[jacc] (j1) at (8.4, 1.6) {API JDBC};
+    % ligne 2 : JPA
+    \node[jbox] (p2) at (5.0, 0) {JPA\\{\scriptsize\color{qamuted}(Hibernate)}};
+    \node[jacc] (j2) at (8.4, 0) {API JDBC};
+    % ligne 3 : Spring Data
+    \node[jbox] (s3) at (2.2,-1.6) {Spring Data\\{\scriptsize\color{qamuted}JPA}};
+    \node[jbox] (p3) at (5.0,-1.6) {JPA\\{\scriptsize\color{qamuted}(Hibernate)}};
+    \node[jacc] (j3) at (8.4,-1.6) {API JDBC};
+    \foreach \k in {1,2,3}{
+      \node[jdb] (db\k) at (11.6, {1.6*(2-\k)}) {BdD};
+      \draw[jarrow] (j\k) -- node[jlbl, above] {pilote} (db\k);
+    }
+    \draw[jarrow] (app.east |- j1) -- node[jlbl, above, pos=0.12] {Ch.\,1} (j1);
+    \draw[jarrow] (app.east |- p2) -- node[jlbl, above, pos=0.25] {Ch.\,4 et 5} (p2);
+    \draw[jarrow] (p2) -- (j2);
+    \draw[jarrow] (app.east |- s3) -- node[jlbl, above] {Ch.\,6} (s3);
+    \draw[jarrow] (s3) -- (p3);
+    \draw[jarrow] (p3) -- (j3);
+  \end{tikzpicture}
+  \end{center}
+  \vspace{2mm}
+  {\small Quel que soit le niveau d'abstraction choisi, ce sont \alert{toujours des appels JDBC} qui partent vers la base.}
+\end{frame}
+
+
+		
+
+
+\section{API JDBC~: \textit{Java Database Connectivity}}
+\subsection{Connexion à une base de données relationnelle}
+
+\begin{frame}
+  \frametitle{JDBC utilise le patron Façade}
+  \begin{center}
+  \begin{tikzpicture}
+    \node[jgold, font=\footnotesize\sffamily] (app) at (0,0) {Application\\Java};
+    \node[jacc, minimum width=1.8cm] (jdbc) at (3.4,0) {JDBC};
+    \draw[jarrow] (app) -- (jdbc);
+    \foreach \k/\nom/\col/\y in {1/PostgreSQL/qaaccent/1.3, 2/MySQL/qaaccent2/0, 3/Oracle/qacodestr/-1.3}{
+      \node[jbox, draw=\col, minimum width=2.9cm] (d\k) at (7.0,\y) {Pilote \nom};
+      \node[jdb=\col, minimum height=0.85cm, minimum width=1.2cm] (b\k) at (10.6,\y) {\nom};
+      \draw[jarrow, dashed] (jdbc.east) -- (d\k.west);
+      \draw[-Stealth, thick, draw=\col] (d\k) -- (b\k);
+    }
+    \node[jlbl, font=\scriptsize\sffamily] at (5.0,-2.15) {chargé à l'exécution};
+  \end{tikzpicture}
+  \end{center}
+  \begin{itemize}
+    \item Derrière l'API JDBC, il y a des pilotes (\textit{Drivers}) spécifiques aux serveurs de BdD
+    \item Ils sont utilisés à l'exécution (implémentent l'API)
+  \end{itemize}
+\end{frame}
+
+\begin{frame}
+  \frametitle{Interfaces de l'API}
+  \begin{center}
+  \begin{tikzpicture}[node distance=0.55cm and 1.2cm]
+    \node[jbox] (dm) {DriverManager};
+    \node[jbox, below=of dm] (drv) {Driver};
+    \node[jacc, below=of drv] (cnx) {Connection};
+    \node[jbox, below left=0.75cm and 0.4cm of cnx] (st) {Statement};
+    \node[jbox, below right=0.75cm and 0.4cm of cnx] (ps) {PreparedStatement};
+    \node[jgold, below=2.4cm of cnx] (rs) {ResultSet};
+    \draw[jarrow] (dm) -- node[jlbl, right] {choisit le pilote (URL)} (drv);
+    \draw[jarrow] (drv) -- node[jlbl, right] {connect()} (cnx);
+    \draw[jarrow] (cnx) -- node[jlbl, above left] {createStatement()} (st);
+    \draw[jarrow] (cnx) -- node[jlbl, above right] {prepareStatement(sql)} (ps);
+    \draw[jarrow] (st) -- node[jlbl, below left] {executeQuery()} (rs);
+    \draw[jarrow] (ps) -- node[jlbl, below right] {executeQuery()} (rs);
+  \end{tikzpicture}
+  \end{center}
+\end{frame}
+
+\begin{frame}
+	\frametitle{Interfaces de l'API -suite-}
+	\begin{itemize}
+		\item \texttt{DriverManager} gère l'annuaire de drivers
+		\item \texttt{Driver} est une interface implémentée sous la forme d'une classe unique (théoriquement) par les différents fournisseurs (\textit{vendors}) de serveurs de BdD 
+		\begin{itemize}
+			\item A son chargement par la JVM une instance est créée
+			\item Cette instance s'enregistre auprès du \texttt{DriverManager}
+			\item Elle permet d'obtenir une connexion au serveur
+		\end{itemize}		 
+		\item \texttt{Connection} permet d'établir une connexion avec le serveur de BdD afin d'exécuter des requêtes
+		\item \texttt{Statement} et \texttt{PreparedStatement} sont des abstractions des requêtes SQL
+		\item \texttt{ResultSet} représente les résultats de l'exécution des requêtes
+	\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]
+	\frametitle{Connexion au serveur}
+
+	\begin{itemize}
+		\item 	Pour se connecter au serveur avec JDBC, on utilise~:
+	\end{itemize}
+\begin{lstlisting}
+Connection connection =  
+ DriverManager.getConnection(
+  "jdbc:postgresql://localhost:5432/app_db", 
+  "postgres", "postgres");
+\end{lstlisting}
+\begin{itemize}
+\item[] où le premier paramètre est l'URL JDBC de connexion à un serveur Postgres
+\item Pour d'autres fournisseurs de serveurs (Oracle, MySQL, ...) l'URL est légèrement différent~:
+\texttt{jdbc:mysql://localhost:3306/app\_db}\\ pour MySQL, par ex
+ \item Écrire le code ci-dessus dans la méthode main d'une classe Java que vous créez dans un projet Maven sous IntelliJ
+ \item On complètera ce code dans les prochains transparents
+	\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]
+	\frametitle{Tester la connexion et fermer la connexion}
+	\begin{itemize}
+		\item Pour tester la connexion~:
+\begin{lstlisting}
+connection.isValid(2);
+\end{lstlisting}
+Le paramètre de \texttt{isValid()} est un timeout en secondes
+		\item Il faut toujours fermer proprement la connexion à une base de données, sinon consommation importante de ressources systèmes (mémoire, sockets et threads)~:
+\begin{lstlisting}
+connection.close();
+\end{lstlisting}
+		Le faire proprement veut dire qu'il faut soit mettre l'instruction dans une clause \texttt{finally} d'un bloc \texttt{try} ou bien utiliser un bloc \texttt{try-with-resources} (voir cours de gestion des exceptions IG3, ou exemples suivants)
+	\end{itemize}
+\end{frame}
+
+\begin{frame}
+	\frametitle{Utiliser un Driver précis}
+	\begin{itemize}
+		\item Pour le moment, on utilise des interfaces et classes abstraites de l'API JDBC (package java.sql)
+		\item Mais comment on indique à la JVM quel Driver (classe d'implémentation de l'interface Driver) précis(e) utiliser~?
+		\begin{enumerate}			 
+			\item Ajouter un dossier \texttt{META-INF/services} dans le dossier \texttt{src/main/resources} de votre projet IntelliJ			
+			\item Ajouter dans ce dossier un fichier texte et le nommer~: \texttt{java.sql.Driver}
+			\item Dans ce fichier, on peut mettre la liste de tous les drivers qu'on veut utiliser dans notre projet
+			\item Pour notre exemple (Postgres), on ajoute la ligne~:
+			\texttt{org.postgresql.Driver} (c'est la classe d'implémentation de l'interface \texttt{java.sql.Driver})
+		\end{enumerate}
+	\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]
+\frametitle{Utiliser un Driver précis -suite-}	
+	 D'où vient la classe \texttt{org.postgresql.Driver}~?
+	\begin{enumerate}
+		\item Déclarer la dépendance Maven suivante~:
+\begin{lstlisting}[language=XML,basicstyle=\lstcode\tiny]
+<dependencies>
+ <!-- https://mvnrepository.com/artifact/org.postgresql/postgresql -->
+ <dependency>
+  <groupId>org.postgresql</groupId>
+  <artifactId>postgresql</artifactId>
+  <version>42.7.8</version>
+ </dependency>
+</dependencies>
+\end{lstlisting}
+	
+	\item Ouvrir la tool-window Maven sur la bande verticale à droite de la fenêtre IntelliJ et appuyer sur le bouton \textit{reload}
+	\item[] Ceci va provoquer le téléchargement de la dépendance (et donc du JAR qui comporte la classe \texttt{org.postgresql.Driver})
+\end{enumerate}
+\end{frame}
+
+
+\begin{frame}
+  \frametitle{Autre méthode pour obtenir une connexion au serveur de BdD}
+  \begin{columns}[T]
+    \begin{column}{0.5\textwidth}
+      \begin{itemize}
+        \item Autre méthode : en utilisant un objet de type \texttt{DataSource}
+        \item Avec JNDI de JEE ou avec des annotations @Resource de JEE ou @Inject de CDI (\textit{Contexts and Dependency Injection})
+        \item Abstraction de \texttt{DriverManager} et \texttt{Driver}
+        \item URL et Driver dans un fichier de config
+        \item Voir JEE (prochain cours)
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \centering
+      \begin{tikzpicture}[node distance=0.5cm]
+        \node[jacc, minimum width=3.4cm, minimum height=1.1cm] (ds)
+          {DataSource\\[-1pt]{\tiny\color{qamuted}masque DriverManager + Driver}};
+        \node[jbox, below=of ds] (cnx) {Connection};
+        \node[jbox, below left=0.6cm and -0.9cm of cnx, minimum width=2.1cm] (st) {Statement};
+        \node[jbox, below right=0.6cm and -0.9cm of cnx, minimum width=2.1cm] (ps) {Prepared\\Statement};
+        \node[jgold, below=2.0cm of cnx] (rs) {ResultSet};
+        \draw[jarrow] (ds) -- node[jlbl, right] {getConnection()} (cnx);
+        \draw[jarrow] (cnx) -- (st);
+        \draw[jarrow] (cnx) -- (ps);
+        \draw[jarrow] (st) -- (rs);
+        \draw[jarrow] (ps) -- (rs);
+      \end{tikzpicture}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\subsection{Gestion des requêtes SQL}
+\begin{frame}[fragile]
+	\frametitle{Création de requêtes SQL}
+	\begin{itemize}
+		\item Pour exécuter une requête, on doit s'appuyer sur des objets de type \texttt{Statement}
+		\item Pour créer de tels objets, on utilse l'objet de type \texttt{Connection}~:
+	\end{itemize}
+\begin{lstlisting}
+Statement statement = connection.createStatement();
+\end{lstlisting}
+	\begin{itemize}		
+		\item Ensuite, on peut exécuter des requêtes SQL~:
+	\end{itemize}
+\begin{lstlisting}
+ResultSet resultSet = statement.executeQuery(
+                      "SELECT * FROM users;");
+\end{lstlisting}
+\begin{itemize}		
+	\item[] Cette méthode retourne un objet enveloppant le résultat
+	\item Il existe plusieurs méthodes pour exécuter des requêtes~: \texttt{execute()}, \texttt{executeQuery()}, \texttt{executeUpdate()}, ...~:
+	{\tiny \url{https://docs.oracle.com/en/java/javase/15/docs/api/java.sql/java/sql/Statement.html}}
+\end{itemize}
+
+
+\end{frame}
+
+\begin{frame}[fragile]
+	\frametitle{Libération des ressources}
+	\begin{itemize}
+		\item Il est important de libérer les objets utilisés pour se connecter à la base de données immédiatement après les avoir utilisé 
+		\item Ceci permet de ne plus les attacher à la BdD $\Rightarrow$ libérer les ressources de l'OS
+		\item Il faudra donc invoquer la méthode close() sur chacun, dans l'ordre inverse de leur création~:
+\begin{lstlisting}
+resultSet.close();
+statement.close();
+connection.close();
+\end{lstlisting}
+	\item Sinon utiliser des blocs imbriqués try-with-resources
+	\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]
+	\frametitle{Récupération des résultats}
+	\begin{itemize}
+		\item Si on veut itérer sur les résultats retournés par un \texttt{SELECT} par exemple, il nous faudra une boucle~:
+\begin{lstlisting}
+while(resultSet.next()) {
+  // Faire quelque chose avec le tuple courant
+  // ...
+}
+\end{lstlisting}
+	\item Un objet 	\texttt{ResultSet} maintient un curseur pour se déplacer dans les tuples du résultat
+	\item La première invocation à \texttt{next()} place le curseur sur le premier tuple dans les résultats et retourne true
+	\item Les invocations suivantes déplacent le curseur jusqu'à la fin (où elle retourne false)
+\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]
+\frametitle{Récupération des résultats -suite-}
+\begin{itemize}
+	\item Contrairement à JPA (qui fait le mapping objet/relationnel), JDBC donne accès aux données brutes de la BdD
+	\item Il faudra donc passer par les multiples méthodes de l'interface \texttt{ResultSet} pour récupérer chaque champ des tuples~: \texttt{getBoolean}, \texttt{getLong}, \texttt{getString}, ...\\
+	{\tiny \url{https://docs.oracle.com/en/java/javase/15/docs/api/java.sql/java/sql/ResultSet.html}}
+	\item Les champs peuvent être obtenus par leur position (numéro de colonne dans la table) ou par leur nom~: \texttt{getString(4)} ou \texttt{getString("email")}
+	\item Navigations possibles avec~: \texttt{next()}, \texttt{previous()}, \texttt{first()}, \texttt{last()}, ...
+	\end{itemize}
+\end{frame}
+
+\begin{frame}
+	\frametitle{Mapping des types de données}
+	\begin{itemize}
+		\item Il n'y a pas de mapping direct (1-1) entre les types génériques SQL et les types Java
+		\item Les types SQL dépendent du fournisseur du serveur de BdD
+		\item Exemple : le type varchar a des limitations différentes selon le serveur
+		 (+65k caractères max sur MySQL, 8k sur SQL Server de Microsoft, et 4k sur Oracle)
+		\item Sur certains serveurs, on a un type Money ...
+		\item En général, le mieux est de ne pas faire d'hypothèses sur les types spécifiques aux serveurs (Money) et définir ses propres classes qui représentent les types complexes (pour rester indépendant d'un fournisseur de serveur particulier)
+		\item Types JDBC :
+		{\tiny \url{https://docs.oracle.com/en/java/javase/15/docs/api/java.sql/java/sql/Types.html}}
+	\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]
+\frametitle{Exécution de requêtes SQL avec \texttt{PreparedStatement}}
+	\begin{itemize}
+						
+		\item Meilleur mécanisme pour exécuter des requêtes SQL
+	\end{itemize}
+\begin{lstlisting}
+PreparedStatement statement = 
+ connection.prepareStatement("SELECT * FROM users;");
+ResultSet resultSet = statement.executeQuery();
+\end{lstlisting}
+	\begin{itemize}
+\item En quoi c'est meilleur~?
+\begin{enumerate}
+	\item Possibilité d'écrire des requêtes paramétrées par des données utilisateurs
+	\item Protection des requêtes paramétrées des attaques (par injection SQL, par ex)
+	\item Meilleure performance : la BdD anticipe le parsing et l'optimisation d'un plan de requêtes (contrairement à \texttt{Statement})
+\end{enumerate}
+	\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]
+	\frametitle{Exécution de requêtes paramétrées SQL}
+	\begin{itemize}
+		\item Créer une requête préparée et lui passer un paramètre~:
+	\end{itemize}
+\begin{lstlisting}
+PreparedStatement statement = 
+ connection.prepareStatement("SELECT * FROM users where user_id=?;");
+statement.setInt(1,1);
+ResultSet resultSet = statement.executeQuery();
+\end{lstlisting}	
+	\begin{itemize}
+		\item \texttt{setInt()} permet de passer un paramètre
+		\item Le première paramètre indique le numéro du paramètre~: 1, 2, ... (dans l'exemple, on a un seul paramètre : 1)
+		\item Le deuxième paramètre indique la valeur du paramètre passé
+	\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]
+	\frametitle{Exemple plus complet}
+\begin{lstlisting}[basicstyle=\lstcode\tiny]
+import java.sql.*;	
+public class UserManager {
+ public boolean printUser() throws SQLException {
+  boolean isValid = false;
+  try (Connection connection = 
+    DriverManager.getConnection("jdbc:postgresql://localhost:5432/app_db", 
+                                "postgres", "postgres")){
+   isValid = connection.isValid(2);
+   try(PreparedStatement statement = 
+     connection.prepareStatement("SELECT * FROM users WHERE user_id=?;");){
+    statement.setInt(1, 1);
+     try (ResultSet resultSet = statement.executeQuery()) {
+      while (resultSet.next()) {
+       System.out.println(resultSet.getString("email"));
+      }
+     }
+   }
+  }
+  return isValid;
+ }	
+ public static void main(String... args) throws Exception {
+  new UserManager().printUser();
+ }
+}
+\end{lstlisting}
+\end{frame}
+
+\begin{frame}[fragile]
+	\frametitle{Mise à jour des données}
+	\begin{itemize}
+		\item Invoquer la méthodes \texttt{executeUpdate()} sur un objet \texttt{PrepraredStatement} (utiliser la même méthode pour l'insertion et la suppression de donnéess)
+	\end{itemize}
+\begin{lstlisting}[basicstyle=\lstcode\scriptsize]
+public void updateEmail(int user_id) throws SQLException {
+ try (Connection connection = 
+  DriverManager.getConnection("jdbc:postgresql://localhost:5432/app_db", "postgres", "postgres")){
+  String query = "UPDATE users SET email=?
+                  WHERE user_id=?;";
+  try(PreparedStatement statement = 
+   connection.prepareStatement(query);){
+   statement.setString(1, "harry.potter@umontpellier.fr");
+   statement.setInt(2,user_id);
+   statement.executeUpdate();//retourne nb tuples mis a jour
+  }
+ }
+}
+\end{lstlisting}
+\end{frame}
+
+
+\subsection{Autres fonctions dans JDBC}
+
+
+%\section{JPA~: \textit{Java Persistence API}}
+\begin{frame}
+  \frametitle{Viviers de connexions (\textit{Connection Pools})}
+  Inconvénient des connexions individuelles : \alert{une connexion réseau par thread}
+  \begin{center}
+  \begin{tikzpicture}
+    \foreach \k/\col in {1/qaaccent, 2/qacodestr, 3/qaaccent2, 4/qacodekw, 5/qamuted}{
+      \node[jthread=\col] (t\k) at (0, {2.4-1.0*\k}) {T\k};
+    }
+    \node[jzone, fit=(t1)(t5), label={[jlbl, font=\scriptsize\sffamily]above:Application Java (threads)}] (app) {};
+    \node[jdb, minimum width=1.8cm, minimum height=1.5cm] (db) at (9.5,-0.6) {BdD};
+    \foreach \k in {1,...,5}{
+      \draw[qaaccent, thick] (t\k.east) .. controls +(2.5,0) and +(-3,0) .. (db.west);
+    }
+    \node[jlbl, font=\scriptsize\sffamily] at (5.6,-2.6) {5 connexions ouvertes (TCP + authentification + processus serveur)};
+  \end{tikzpicture}
+  \end{center}
+  Trop de ressources système consommées, et ouvrir une connexion coûte cher (plusieurs ms).
+\end{frame}
+
+\begin{frame}
+  \frametitle{Viviers de connexions (\textit{Connection Pools})}
+  Une solution : un vivier de connexions \alert{ouvertes une fois, puis prêtées et rendues}
+  \begin{center}
+  \begin{tikzpicture}
+    \foreach \k/\col in {1/qaaccent, 2/qacodestr, 3/qaaccent2, 4/qacodekw, 5/qamuted}{
+      \node[jthread=\col] (t\k) at (0, {2.4-1.0*\k}) {T\k};
+    }
+    \node[jzone, fit=(t1)(t5), label={[jlbl, font=\scriptsize\sffamily]above:Application Java (threads)}] (app) {};
+    \foreach \k/\y/\fc/\tc in {1/0.75/qaaccent2/qabg, 2/0.25/qaaccent2/qabg, 3/-0.25/qapanel/qatext, 4/-0.75/qapanel/qatext}{
+      \node[rectangle, rounded corners=2pt, draw=qaaccent2, thick, minimum width=0.9cm,
+            minimum height=0.38cm, font=\tiny\ttfamily, text=\tc, fill=\fc] (c\k) at (5.0,\y-0.6) {cnx\k};
+    }
+    \node[jzone, fit=(c1)(c4), label={[jlbl, font=\scriptsize\sffamily]above:Vivier (HikariCP\ldots)}] (pool) {};
+    \node[jdb, minimum width=1.8cm, minimum height=1.5cm] (db) at (9.5,-0.6) {BdD};
+    \foreach \k in {1,...,4}{\draw[qamuted, thick] (c\k.east) .. controls +(1,0) and +(-1.2,0) .. (db.west);}
+    \draw[qaaccent, very thick, -Stealth] (t1.east) .. controls +(2,0) and +(-1.5,0) .. (c1.west);
+    \draw[qacodestr, very thick, -Stealth] (t2.east) .. controls +(2,0) and +(-1.5,0) .. (c2.west);
+    \node[jlbl, font=\scriptsize\sffamily, anchor=west] at (0.8,-2.6)
+      {T3, T4, T5 : pas de connexion en ce moment};
+    \node[jlbl, font=\scriptsize\sffamily] at (5.0,-1.95)
+      {\textcolor{qaaccent2}{$\blacksquare$} prêtée \quad \textcolor{qaaccent2}{$\square$} libre};
+  \end{tikzpicture}
+  \end{center}
+  \texttt{close()} \alert{rend} la connexion au vivier au lieu de la fermer.
+\end{frame}
+
+
+\begin{frame}
+	\frametitle{Viviers de connexions (\textit{Connection Pools})}
+	\begin{itemize}		
+		\item Ce mécanisme est spécifié dans JDBC comme alternative pour se connecter à un serveur de BdD (l'API JDBC reste inchangée que l'on utilise un vivier ou pas)
+		\item Un fournisseur de \textit{Connection Pools} gère un cache avec un vivier de connexions qui ne sont pas fermés après chaque invocation de \texttt{close()}
+		\item Les connexions sont libérées et peuvent être réutilisées par d'autres threads
+		\item Si toutes les connexions d'un vivier sont utilisées, ce fournisseur en crée de nouvelles
+		\item Il existe plusieurs fournisseurs : HikariCP, Apache DBCP, C3PO, ...
+		\item Les serveurs d'applications (comme Java EE -- prochain cours) fournissent ce genre de mécanismes (scalabilité, perf, ...)
+	\end{itemize}
+\end{frame}
+
+\begin{frame}
+	\frametitle{Transactions dans JDBC}
+	\begin{itemize}		
+		\item Plusieurs requêtes à exécuter de façon atomique
+		\item Par défaut, JDBC fait un autocommit après  l'exécution de chaque requête
+		\item Si jamais on a, par exemple, une première requête qui s'exécute avec succès et la suivante qui échoue, la BdD peut se retrouver dans un état incohérent
+		\item Solution dans JDBC : utiliser l'objet Connection
+		\begin{enumerate}
+			\item désactiver l'autocommit au début~:\\
+			\texttt{connection.setAutoCommit(false);}
+			\item invoquer \texttt{connection.commit()} si succès de toutes les requêtes de la transaction et \texttt{connection.rollback()} sinon
+		\end{enumerate}
+		\item Transactions concurrentes, niveaux d'isolation et verrous~: \alert{chapitre 2}
+		
+	\end{itemize}
+\end{frame}
+
+
+\rquestionslide
+
+
+\appendix
+\section{Annexes (\`a lire en autonomie)}
+
+\begin{frame}{Contenu des annexes}
+  \begin{itemize}
+    \item Installer PostgreSQL sous Docker et utiliser \texttt{psql} (repris au d\'ebut du TP1)
+    \item Ancien code (\texttt{Class.forName})
+    \item Conteneuriser l'application Java et la relier au serveur par un r\'eseau Docker
+    \item CLOB/BLOB et objets \texttt{RowSet}
+  \end{itemize}
+\end{frame}
+
+\begin{frame}
+	\frametitle{Installer un serveur}
+	\begin{itemize}
+		\item Nous allons utiliser Postgres comme serveur de données
+		\item Démarrer un serveur Postgres en utilisant Docker
+		\item D'abord s'assurer qu'il n'y a pas un service Postgres qui est actif sur votre machine (sous Windows, voir la configuration des services)
+		\item Si vous n'avez pas Docker sur votre machine, l'installer : \url{https://docs.docker.com/get-docker/}
+		\item Pour démarrer un container Docker avec un serveur Posgres~:
+		\begin{itemize}
+			\item Ouvrir un terminal
+			\item Exécuter la commande~:\\ {\footnotesize \texttt{docker run ---name postgres-db ---rm -P -p 127.0.0.1:5432:5432 -e POSTGRES\_USER=postgres
+					 -e POSTGRES\_PASSWORD=postgres -d postgres} }
+		\end{itemize}
+
+	\end{itemize}
+\end{frame}	
+
+\begin{frame}
+	\frametitle{Installer un serveur -suite-}
+	\begin{itemize}
+		
+		\item Tester le bon démarrage du container/serveur avec la commande~: \texttt{docker ps}
+		
+		\item[] Ceci doit vous indiquer la présence d'un container démarré sous le nom \texttt{postgres-db} 
+		
+		\item Pour arrêter le container~: \texttt{docker stop postgres-db}
+		
+		\item Pour supprimer le container~: \texttt{docker rm postgres-db}
+		
+		
+\end{itemize}
+\end{frame}	
+
+\begin{frame}
+\frametitle{Installer un serveur -suite-}
+\begin{itemize}	
+	\item Tel que nous l'avons créé et démarré, le container Docker ne permet pas de garder les données de la BdD sur le \textit{file system} de la machine hôte, si jamais on l'arrête (les données sont perdues)	
+		\item Pour avoir des données persistantes, il faut créer/utiliser un volume~:
+		\begin{enumerate}
+			\item Arrêter le container~: \texttt{docker stop postgres-db}
+			\item Créer un volume~: \texttt{docker volume create app\_vol}
+			\item Démarrer le container en utilisant ce volume~:\\
+			{\footnotesize \texttt{docker run ---name postgres-db ---rm -P -p 127.0.0.1:5432:5432 -e POSTGRES\_USER=postgres -e POSTGRES\_PASSWORD=postgres -v app\_vol:/var/lib/postgresql -d postgres} }
+		\end{enumerate}
+		
+	\end{itemize}
+\end{frame}	
+
+\begin{frame}
+	\frametitle{Accéder au serveur en ligne de commande avec PSQL}
+	\begin{itemize}			
+		\item Pour accéder au serveur, taper la commande~:\\
+			\texttt{docker exec -it postgres-db psql -U postgres}
+		\item[] Ceci démarre un shell PSQL dans le container postgres-db avec l'utilisateur (option -U) \texttt{postgres}
+		\item Dans le Shell, lister les bases de données avec $\backslash l$
+		\item Vous pouvez lister les tables de la base de données courante (qui s'appelle postgres, créée par défaut) avec $\backslash d$
+		\item Au départ, ceci vous indique qu'il n'y a pas de tables (relations)
+		\item Créer une base de données avec la requête SQL :\\
+		\texttt{CREATE DATABASE app\_db;}
+		\item[] Avec la commande $\backslash l$, vous allez voir cette base de données
+		
+\end{itemize}
+\end{frame}	
+
+\begin{frame}%[fragile]
+	\frametitle{Exécuter des requêtes en ligne de commande sur PSQL}
+	\begin{itemize}
+		
+		\item Se connecter à cette base :  $\backslash c~app\_db$
+		\item Créer une table dans cette base de données en utilisant la requête suivante~:\\
+		{\footnotesize
+%\begin{verbatim}
+\texttt{CREATE TABLE users(\\
+ ~user\_id serial NOT NULL PRIMARY KEY,\\
+ ~first\_name varchar(30) NOT NULL,\\
+ ~last\_name varchar(30) NOT NULL,\\
+ ~email varchar(80) NOT NULL,\\
+ ~phone\_number varchar(20) NOT NULL,\\
+ ~password varchar(100) NOT NULL\\
+);}\\}
+%\end{verbatim}
+Vérifier la présence de la table dans la base ($\backslash d$)
+\item Vérifier le schéma de la table avec~: \texttt{$\backslash d~users$}
+\end{itemize}
+
+\end{frame}	
+
+\begin{frame}
+\frametitle{Exécuter des requêtes en ligne de commande sur PSQL -suite-}
+	\begin{itemize}
+		
+		\item Dans le Shell PSQL, ajouter l'extension qui nous permettra d'exécuter des requêtes SQL où l'on peut crypter des mots de passe~:\\
+\texttt{CREATE EXTENSION pgcrypto;	}
+
+		
+		\item Insérer un tuple (record) dans la table users~: (attention aux apostrophes quand vous copiez/collez depuis le PDF)\\
+		{\footnotesize 
+			\texttt{
+				INSERT INTO users(first\_name,last\_name,email,phone\_number,password) \\
+				~VALUES('Harry','Potter','harry.potter@gmail.com',\\~~'+44 123456789',
+				crypt('1234',gen\_salt('bf', 8)));
+			}
+		}
+		\item[] Noter à la dernière ligne l'utilisation des fonctions de \texttt{pgcrypto} pour le hachage du mot de passe en utilisant l'algorithme BF (BlowFish) avec un sel
+\end{itemize}
+\end{frame}	
+
+\begin{frame}[fragile]
+	\frametitle{Exécuter des requêtes en ligne de commande sur PSQL -suite-}
+	\begin{itemize}		
+		\item Vérifier la présence de ce tuple dans la table~:
+\begin{lstlisting}[language=SQL]
+SELECT * FROM users;
+\end{lstlisting}	
+	\item Tester d'autres requêtes SQL	
+	\item Pour quitter le Shell~:  $\backslash q$
+	\end{itemize}
+Noter que le serveur Postgres est par défaut accessible sur le port 5432 (modifiable dans la commande de démarrage du container Docker)
+\end{frame}
+
+\begin{frame}[fragile]
+	\frametitle{Applications légataires}
+	\begin{itemize}
+		\item Dans certaines applications légataires, qui utilisent d'anciennes versions de JDBC (avant 2006), vous trouverez l'instruction suivante, avant \texttt{getConnection()}~:
+	\end{itemize}
+\begin{lstlisting}
+Class.forName("org.postgresql.Driver").newInstance();
+\end{lstlisting}
+	\begin{itemize}
+\item[] Ceci permet de déclencher le chargement de la classe Driver et de son instanciation
+\item Depuis Java 6, et l'arrivée du système de services, les drivers sont enregistrés automatiquement depuis le fichier \texttt{java.sql.Driver}, vu précédemment 
+	\end{itemize}
+\end{frame}
+
+\begin{frame}
+	\frametitle{Conteneuriser l'application Java avec Docker}
+	\begin{itemize}		
+		\item Construisez un JAR exécutable de votre application, en utilisant Maven :
+		\begin{itemize}
+			\item récupérez le fichier pom.xml sur Moodle (on a ajouté dedans un plugin maven, qui s'appelle \textit{shade}, et qui permet de créer un JAR exécutable)
+			\item éditez le fichier pom.xml pour changer le nom de la classe qui contient le main
+		\end{itemize}
+		\item Ajoutez dans votre projet le Dockerfile qui est sur Moodle
+		\item Ce fichier va vous permettre de construire une image Docker de votre application comme suit :\\
+		\texttt{docker build -t example\_jdbc .}\\
+		où example\_jdbc est le nom de votre image (celle-ci sera taggée \texttt{latest}, sinon utilisez \texttt{example\_jdbc:1.0.0})
+		\item Démarrez votre app dans un container~: (l'app ne marchera pas)\\
+		\texttt{docker run example\_jdbc} 
+	\end{itemize}
+\end{frame}
+
+\begin{frame}
+	\frametitle{Lier les containers par un réseau Docker}
+	Pourquoi l'app ne marchait pas ? parce que les containers (Postgres et celui qui va exécuter votre app Java) sont isolés et ne partagent aucun réseau 
+	\begin{itemize}		
+		\item Créez un réseau utilisateur Docker~:\\
+		\texttt{docker network create app\_net}
+		\item Au démarrage de chacun des deux containers, utilisez l'option \texttt{---network} comme suit :\\
+		\texttt{docker run ... \textcolor{qaaccent2}{---network app\_net} postgres}\\
+		\texttt{docker run \textcolor{qaaccent2}{---network app\_net} example\_jdbc}
+		\item Dans le code Java, remplacez, dans l'url de connexion, \texttt{localhost} par le nom du container Docker : \texttt{postgres-db}
+		\item Utilisez le port 5432. Le port mapping n'est pas utile. Vous pouvez le supprimer de la commande \texttt{docker run ...} qui démarre le container postgres (l'option \texttt{-p})
+	\end{itemize}
+	
+\end{frame}
+
+%\begin{frame}
+%	\frametitle{Stocker votre image Docker dans un Registry}
+%	Ajoutez votre image dans le registry de Gitlab Polytech
+%	\begin{itemize}
+%		\item Créez un projet Gitlab sur \url{https://gitlab.polytech.umontpellier.fr} pour héberger votre code
+%		\item Allez dans la rubrique \textit{Packages \& Registries} puis \textit{Container Registry}
+%		\item Suivez les instructions pour se connecter (\texttt{docker login}) et construire/pousser une image \texttt{docker build/push}
+%		\item Vous pouvez maintenant partager votre application comme une image Docker avec qui vous voulez 
+%	\end{itemize}
+%	
+%\end{frame}
+
+\begin{frame}
+	\frametitle{CLOB et BLOB}
+	\begin{itemize}
+		\item De larges morceaux de données texte (CLOB) ou binaires (BLOB)
+		\item \textit{CLOB: Character Large OBject}
+		\item \textit{BLOB: Binary Large OBject}
+		\item Exemples de CLOB : des documents texte, des descriptions HTML, ...
+		\item Exemples de BLOB : des images, des vidéos, ...
+	\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]
+	\frametitle{Écrire un CLOB dans une BdD}
+	\begin{itemize}
+		\item D'abord insérer une nouvelle colonne cv dans la table users~: Sur le Shell psql
+	\end{itemize}	
+
+\begin{lstlisting}[language=SQL]
+ALTER TABLE users ADD COLUMN cv text;
+\end{lstlisting}
+	\begin{itemize}
+\item Ensuite, lire un texte depuis un InputStreamReader et utiliser JDBC pour l'ajouter à la requête SQL \texttt{update} ou \texttt{insert}~:
+\end{itemize}
+\begin{lstlisting}[basicstyle=\lstcode\scriptsize]
+String query = "UPDATE users SET cv=? WHERE user_id=?;";
+try(PreparedStatement statement = 
+ connection.prepareStatement(query);){
+ InputStreamReader inputStreamReader = 
+  new InputStreamReader(getClass().getClassLoader().getResourceAsStream("cv.html"));
+ statement.setCharacterStream(1, inputStreamReader);
+ statement.setInt(2,1);
+ statement.executeUpdate();
+ return true;
+}
+\end{lstlisting}
+\end{frame}
+
+\begin{frame}
+	\frametitle{Exemple précédent}
+	\begin{itemize}
+		\item Dans la diapo précédente, nous avons utilisé la méthode \texttt{setCharacterStream()} de \texttt{PreparedStatement} pour ajouter le texte lu depuis le stream dans la requête
+		\item Pour lire le texte depuis le résultat de l'exécution d'une requête, on utilise \texttt{getCharacterStream()} de \texttt{ResultSet}
+		\item Cette méthode prend en paramètre la position de la colonne ou son nom (comme les autres méthodes getXxx() de \texttt{ResultSet})
+		\item A vos claviers : tester l'exemple
+	\end{itemize}
+\end{frame}
+
+\begin{frame}
+\frametitle{Lire et écrire des BLOB}
+\begin{itemize}		
+		\item Pour les fichiers binaires (données BLOB), utiliser \texttt{FileInputStream} à la place de \texttt{InputStreamReader} 
+		\item Utiliser la méthode \texttt{setBinaryStream()} à la place de \texttt{setCharacterStream()}
+		\item Utiliser la méthode \texttt{getBinaryStream()} à la place de \texttt{getCharacterStream()}
+		\item A vos claviers : tester l'exemple d'un fichier contenant la photo de l'utilisateur
+ 	\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]
+	\frametitle{Les objets RowSet}
+	\begin{itemize}		
+		\item \texttt{RowSet} est une extension de \texttt{ResultSet}
+		\item Un objet \texttt{RowSet} peut être sérialisé (stocké, envoyé, ...)
+		\item \texttt{RowSet} peut être utilisée même lors d'une déconnexion du serveur de la BdD~:
+		\begin{itemize}
+			\item \texttt{ResultSet} maintient les ressources système (threads, sockets, ...) jusqu'à l'invocation de \texttt{close()}
+			\item \texttt{RowSet} peut utiliser un cache en mémoire (\texttt{CachedRowSet}). ça libère donc la connexion au serveur
+		\end{itemize}
+		\item Avantage : + rapide, mais peut consommer beaucoup de mémoire et les données peuvent être obsolètes
+		\item A utiliser avec des données qui ne sont pas fréquemment mises à jour
+	\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]
+\frametitle{Les objets RowSet -suite-}
+\begin{itemize}
+\item Exemple d'utilisation d'un \texttt{CachedRowSet}~:
+\begin{lstlisting}[basicstyle=\lstcode\scriptsize]
+String query = "SELECT * FROM users;";
+RowSetFactory factory = RowSetProvider.newFactory();
+CachedRowSet rowSet = factory.createCachedRowSet();
+rowSet.setUrl("jdbc:postgresql://localhost:5432/app_db?user=postgres&password=postgres");
+rowSet.execute();
+\end{lstlisting}
+Après l'invocation de \texttt{execute()}, on peut invoquer les méthodes \texttt{getXxx()} héritées de \texttt{ResultSet}
+\end{itemize}
+\end{frame}
+
+\end{document}

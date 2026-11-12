@@ -1,0 +1,199 @@
+% ---------------------------------------------------------------
+% R3.07 SQL dans un langage de programmation -- preambule commun des diapositives
+% Charte derivee de R5.A.08 Qualite de developpement (metropolis, dark tech)
+% Palette IUT partagee (violet du logo + accent or)
+% Utilisation :
+%   \documentclass[aspectratio=169,10pt]{beamer}
+%   \input{../../latex/common/r307-slides-preamble.tex}
+%   \graphicspath{{../../latex/common/assets/}{img/}{figs/}}
+% ---------------------------------------------------------------
+\usetheme{metropolis}
+\usepackage{appendixnumberbeamer}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[french]{babel}
+\usepackage[scale=0.94]{tgheros}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric, shapes, arrows, arrows.meta, positioning, calc, fit}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage[skins,listings]{tcolorbox}
+\usepackage{qrcode}
+\usepackage{hyperref}
+
+% ---------------------------------------------------------------
+% PALETTE (dark-mode tech: near-black canvas, violet (logo IUT) + gold accents)
+% ---------------------------------------------------------------
+\definecolor{qabg}{HTML}{0E1016}      % canvas background
+\definecolor{qapanel}{HTML}{181B24}   % card / block panel
+\definecolor{qapanelalt}{HTML}{20242F}% secondary panel tint
+\definecolor{qaline}{HTML}{2B303D}    % hairline rules / table rules
+\definecolor{qatext}{HTML}{ECEEF2}    % primary text (off-white)
+\definecolor{qamuted}{HTML}{8B93A6}   % secondary / caption text
+\definecolor{qaaccent}{HTML}{D93ED7}  % primary accent -- violet du logo IUT, eclairci pour fond sombre
+\definecolor{qaaccent2}{HTML}{F2B84B} % secondary accent -- or/ambre
+\definecolor{qacodekw}{HTML}{C792EA}  % code : mots-cles
+\definecolor{qacodestr}{HTML}{C3E88D} % code : chaines
+\definecolor{qacodecom}{HTML}{7F8AA3} % code : commentaires
+\definecolor{qacodeann}{HTML}{F2B84B} % code : annotations / javadoc
+
+\setbeamercolor{background canvas}{bg=qabg}
+\setbeamercolor{normal text}{fg=qatext}
+\setbeamercolor{palette primary}{bg=qabg, fg=qamuted}
+\setbeamercolor{frametitle}{bg=qabg, fg=qatext}
+\setbeamercolor{progress bar}{fg=qaaccent, bg=qaline}
+\setbeamercolor{alerted text}{fg=qaaccent2}
+\setbeamercolor{block title}{bg=qapanel, fg=qaaccent}
+\setbeamercolor{block body}{bg=qapanel, fg=qatext}
+\setbeamercolor{block title alerted}{bg=qapanel, fg=qaaccent2}
+\setbeamercolor{block body alerted}{bg=qapanel, fg=qatext}
+\setbeamercolor{block title example}{bg=qapanelalt, fg=qaaccent}
+\setbeamercolor{block body example}{bg=qapanelalt, fg=qatext}
+\setbeamercolor{example text}{fg=qaaccent}
+\setbeamercolor{itemize item}{fg=qaaccent}
+\setbeamercolor{itemize subitem}{fg=qaaccent2}
+\setbeamercolor{enumerate item}{fg=qaaccent}
+\setbeamercolor{enumerate subitem}{fg=qaaccent2}
+\setbeamercolor{caption}{fg=qamuted}
+\setbeamercolor{page number in head/foot}{fg=qamuted, bg=qabg}
+\setbeamercolor{title}{fg=qatext}
+\setbeamercolor{subtitle}{fg=qamuted}
+\setbeamercolor{author}{fg=qatext}
+\setbeamercolor{institute}{fg=qamuted}
+\setbeamercolor{date}{fg=qamuted}
+\setbeamercolor{section in toc}{fg=qatext}
+\setbeamercolor{subsection in toc}{fg=qamuted}
+
+\setbeamertemplate{blocks}[rounded][shadow=false]
+\setbeamertemplate{itemize item}{\raisebox{0.15em}{\scriptsize\textcolor{qaaccent}{\ensuremath{\blacktriangleright}}}}
+\setbeamertemplate{itemize subitem}{\raisebox{0.1em}{\tiny\textcolor{qaaccent2}{\ensuremath{\bullet}}}}
+
+\setbeamerfont{frametitle}{series=\bfseries, size=\Large}
+\setbeamerfont{title}{series=\bfseries, size=\Large}
+\setbeamerfont{subtitle}{size=\normalsize}
+\setbeamerfont{institute}{size=\scriptsize}
+\setbeamerfont{date}{size=\scriptsize}
+\setbeamerfont{author}{size=\small}
+
+\metroset{sectionpage=none, subsectionpage=none, numbering=fraction, progressbar=frametitle}
+\setbeamertemplate{section in toc}[sections numbered]
+
+% ---------------------------------------------------------------
+% LISTINGS -- theme sombre (lstlisting reste utilisable tel quel)
+% \lstcode : police + couleur de base, a reutiliser dans les
+%            surcharges locales (ex. basicstyle=\lstcode\scriptsize)
+% ---------------------------------------------------------------
+\newcommand{\lstcode}{\ttfamily\color{qatext}}
+
+\lstdefinelanguage{TypeScript}{
+  keywords={typeof, new, true, false, catch, function, return, null, switch, var,
+    if, in, while, do, else, case, break, const, let, interface, class, extends,
+    implements, enum, export, import, this, super, constructor, public, private,
+    protected, static, async, await, throw, throws, try, finally, void},
+  ndkeywords={boolean, any, number, string, int, long, double},
+  sensitive=true,
+  comment=[l]{//},
+  morecomment=[s]{/*}{*/},
+  morestring=[b]',
+  morestring=[b]"
+}
+
+\lstset{
+  language=Java,
+  basicstyle=\lstcode\footnotesize,
+  keywordstyle=\color{qacodekw}\bfseries,
+  ndkeywordstyle=\color{qaaccent2}\bfseries,
+  identifierstyle=\color{qatext},
+  stringstyle=\color{qacodestr},
+  commentstyle=\color{qacodecom}\itshape,
+  morecomment=[s][\color{qacodeann}]{/**}{*/},
+  backgroundcolor=\color{qapanelalt},
+  rulecolor=\color{qaline},
+  frame=single,
+  framesep=3pt,
+  xleftmargin=4pt,
+  xrightmargin=4pt,
+  keepspaces=true,
+  columns=fullflexible,
+  showstringspaces=false,
+  breaklines=true,
+  tabsize=2,
+  escapeinside={(*@}{@*)},
+}
+
+% ---------------------------------------------------------------
+% CARD-STYLE BOXES
+% ---------------------------------------------------------------
+\tcbset{
+  figcard/.style={colback=white, colframe=white, boxrule=0pt, arc=4pt,
+    left=3pt, right=3pt, top=3pt, bottom=3pt, boxsep=0pt,
+    halign=center, valign=center},
+  datacard/.style={colback=qapanel, colframe=qaline, boxrule=0.4pt, arc=3pt,
+    left=8pt, right=8pt, top=6pt, bottom=6pt, coltext=qatext,
+    before upper={\color{qatext}}, halign=center},
+  codebox/.style={colback=qapanelalt, colframe=qaline, boxrule=0.4pt, arc=3pt,
+    left=8pt, right=8pt, top=5pt, bottom=5pt, listing only,
+    listing options={basicstyle=\ttfamily\small\color{qaaccent},
+      breaklines=true, showstringspaces=false, columns=fullflexible,
+      keepspaces=true, frame=none, backgroundcolor={}}}
+}
+\newtcolorbox{figcard}[1][]{figcard,#1}
+\newtcolorbox{datacard}{datacard}
+\newtcblisting{codebox}{codebox}
+
+% ---------------------------------------------------------------
+% HANDY MACROS
+% ---------------------------------------------------------------
+\newcommand{\hl}[1]{\alert{#1}}
+\newcommand{\source}[1]{{\scriptsize\color{qamuted}#1}}
+
+% Sommaire automatique en debut de section
+\AtBeginSection[]{%
+  \begin{frame}<beamer>{Plan du cours}
+    \tableofcontents[currentsection]
+  \end{frame}}
+
+% Page de titre : \rtitleslide{numero de chapitre}{titre du chapitre}
+% Les auteurs sont repris de \rauthors (modifiable avant \begin{document})
+\newcommand{\rauthors}{Selena Lamari et Chouki Tibermacine}
+\newcommand{\rtitleslide}[2]{%
+\begin{frame}[plain,noframenumbering]
+  \begin{center}
+    \vspace{2mm}
+    {\color{qaaccent}\rule{2.1cm}{1.2pt}}\\[6mm]
+    {\Large\bfseries\color{qatext} R3.07}\\[1mm]
+    {\Large\bfseries\color{qatext} SQL dans un langage de programmation}\\[5mm]
+    {\large\color{qamuted} Chapitre #1}\\[1mm]
+    {\large\color{qaaccent} #2}\\[6mm]
+    \includegraphics[height=2.1cm]{iut_logo_transparent.png}
+
+    \vspace{4mm}
+
+    {\small\color{qatext} \rauthors}\\[1mm]
+    {\scriptsize\color{qamuted} BUT 2 Informatique --- IUT de Vannes --- Universit\'e Bretagne Sud}
+  \end{center}
+\end{frame}
+}
+
+% ---- Diapo de fin « Questions ? » (même modèle que R5.A.08) ----
+\newcommand{\rcontact}{Chouki.Tibermacine@univ-ubs.fr}
+\newcommand{\rquestionslide}{%
+\begin{frame}{Questions ?}
+  \begin{center}
+    \vspace{2mm}
+    \begin{tikzpicture}
+      \node[regular polygon, regular polygon sides=6, draw=qaline, thick,
+        minimum size=4.6cm, rotate=90] (hexin) {};
+      \node[regular polygon, regular polygon sides=6, draw=qaaccent, dashed,
+        thick, minimum size=6.2cm, rotate=90] (hexout) {};
+      \node[font=\fontsize{92}{92}\selectfont\bfseries, color=qaaccent2] at (hexin) {?};
+    \end{tikzpicture}\\[5mm]
+    {\small\color{qamuted} \rcontact}
+  \end{center}
+\end{frame}}

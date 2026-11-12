@@ -1,0 +1,374 @@
+\documentclass[aspectratio=169,10pt]{beamer}
+\input{../../latex/common/r307-slides-preamble.tex}
+\graphicspath{{../../latex/common/assets/}}
+\usepackage{dirtree}
+
+\title{Patrons DAO et DTO}
+\author[C. Tibermacine]{Selena Lamari et Chouki Tibermacine}
+\date{}
+
+\begin{document}
+	
+	\rtitleslide{5}{Patrons DAO et DTO}
+
+
+\begin{frame}{Introduction}
+    \begin{block}{DAO (Data Access Object)}
+        \begin{itemize}
+            \item Séparation de la logique métier et de l'accès aux données.
+            \item Fournit une interface unifiée pour accéder à une source de données (BDD, fichiers, etc.).
+        \end{itemize}
+    \end{block}
+    \begin{block}{DTO (Data Transfer Object)}
+        \begin{itemize}
+            \item Objet simple utilisé pour transférer des données entre processus ou couches.
+            \item Réduit le nombre d'appels réseau en regroupant les données.
+        \end{itemize}
+    \end{block}
+\end{frame}
+
+\begin{frame}[fragile]{Exemple DAO en Java (JDBC)}
+    \begin{exampleblock}{Interface DAO}
+        \begin{lstlisting}[language=Java]
+public interface UserDAO {
+    void addUser(User user);
+    User getUser(int id);
+    List<User> getAllUsers();
+}
+        \end{lstlisting}
+    \end{exampleblock}
+\end{frame}
+
+\begin{frame}[fragile]{Exemple DAO en Java (Implémentation JDBC)}
+        \begin{lstlisting}[language=Java]
+public class UserDAOImpl implements UserDAO {
+ private Connection connection;
+ public UserDAOImpl(Connection connection) {
+  this.connection = connection;
+ }
+ @Override
+ public void addUser(User user) throws SQLException {
+  String sql = "INSERT INTO users (name, email) VALUES (?, ?)";
+  try (PreparedStatement stmt = connection.prepareStatement(sql)) {
+   stmt.setString(1, user.getName());
+   stmt.setString(2, user.getEmail());
+   stmt.executeUpdate();
+  }
+ }
+}
+\end{lstlisting}
+\end{frame}
+
+\begin{frame}[fragile]{Exemple DTO en Java}
+        \begin{lstlisting}[language=Java]
+public class UserDTO {
+    private int id;
+    private String name;
+    private String email;
+
+    // Getters et Setters
+    public int getId() { return id; }
+    public void setId(int id) { this.id = id; }
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
+    public String getEmail() { return email; }
+    public void setEmail(String email) { this.email = email; }
+}
+        \end{lstlisting}
+\end{frame}
+
+
+\begin{frame}{Où utilise-t-on DAO et DTO ?}
+    \begin{block}{DAO (Data Access Object)}
+        \begin{itemize}
+            \item Utilisé dans la \textbf{couche d'accès aux données}.
+            \item Abstraction de la source de données (BDD, API, fichiers, etc.).
+            \item Exemple : Accès à une base de données avec JDBC, Hibernate, ou un ORM.
+        \end{itemize}
+    \end{block}
+\end{frame}
+
+\begin{frame}{Où utilise-t-on DAO et DTO ? -suite-}    
+    \begin{block}{DTO (Data Transfer Object)}
+        \begin{itemize}
+            \item Utilisé pour \textbf{transférer des données} entre couches (ex : entre la couche service et la couche présentation).
+            \item Évite d'exposer les objets métier ou les entités issues de la bdd directement.
+            \item Exemple : retourner un objet User avec des informations non-sensibles (retirer le password, ...).
+            \item Exemple : réponse d'une API REST (alléger les réponses), données envoyées à une vue.
+        \end{itemize}
+    \end{block}
+\end{frame}
+
+
+\begin{frame}[fragile]{O\`u placer la fronti\`ere de transaction ?}
+  \begin{itemize}
+    \item Le code JDBC des transactions (\texttt{setAutoCommit}, \texttt{commit}, \texttt{rollback}) a \'et\'e vu au \alert{chapitre 2}
+    \item Un DAO = une table/entit\'e. Or un cas d'usage m\'etier touche souvent \alert{plusieurs DAO}
+    \item[$\Rightarrow$] La transaction se d\'emarre et se termine dans la \textbf{couche service}, et les DAO partagent la m\^eme connexion
+  \end{itemize}
+\begin{lstlisting}[language=Java]
+public void virer(int src, int dst, double montant) throws SQLException {
+  try (Connection c = dataSource.getConnection()) {
+    c.setAutoCommit(false);
+    try {
+      compteDAO.debiter(c, src, montant);
+      compteDAO.crediter(c, dst, montant);
+      operationDAO.journaliser(c, src, dst, montant);
+      c.commit();
+    } catch (SQLException e) { c.rollback(); throw e; }
+  }
+}
+\end{lstlisting}
+  {\small\color{qamuted} Avec JPA ou Spring : m\^eme principe (\texttt{EntityTransaction}, puis \texttt{@Transactional} sur le service).}
+\end{frame}
+
+\begin{frame}[fragile]{Gestion des exceptions}
+\textbf{Ne pas exposer} les exceptions SQL dans les couches supérieures.
+Utiliser des exceptions métiers ou des DTOs pour retourner des erreurs
+\begin{lstlisting}[language=Java]  
+public UserDTO getUserById(int id) {
+    try {
+        // Logique SQL
+    } catch (SQLException e) {
+        throw new DataAccessException("Erreur lors de la recuperation de l'utilisateur", e);
+    }
+}
+
+\end{lstlisting}
+\end{frame}
+
+
+\begin{frame}{Structure typique d'une application}
+\begin{center}
+    \begin{tikzpicture}[
+        layer/.style={draw=qaaccent, rounded corners, fill=qapanel, text=qatext, font=\small, rectangle, minimum width=3cm, minimum height=0.7cm, align=center},
+        node distance=0.6cm,
+        arrow/.style={->, >=stealth', thick, qamuted}
+    ]
+        \node[layer, fill=qapanel] (presentation) {Présentation (API/UIView)};
+        \node[layer, fill=qapanel, below=of presentation] (service) {Service (Logique métier)};
+        \node[layer, fill=qapanel, below=of service] (dao) {DAO (Accès aux données)};
+        \node[layer, fill=qapanel, below=of dao] (database) {Base de données};
+
+        \draw[arrow] (presentation) -- node[anchor=west] {DTO} (service);
+        \draw[arrow] (service) -- node[anchor=west] {DTO/Entité} (dao);
+        \draw[arrow] (dao) -- node[anchor=west] {SQL/Requêtes} (database);
+        \draw[arrow] (dao) -- node[anchor=east] {Entité} (service);
+    \end{tikzpicture}
+\end{center}
+    \begin{center}
+        \small{Les DTO circulent entre les couches, les DAO interagissent avec la bdd.}
+    \end{center}
+\end{frame}
+
+\begin{frame}{Exemple d'architecture avec DAO et DTO}
+\begin{center}
+    \begin{tikzpicture}[
+        layer/.style={draw=qaaccent, rounded corners, fill=qapanel, text=qatext, font=\small, rectangle, minimum width=2.5cm, minimum height=0.65cm, align=center},
+        node distance=0.75cm and 1.8cm,
+        arrow/.style={->, >=stealth', thick, qamuted}
+    ]
+        \node[layer, fill=qapanel] (api) {API REST};
+        \node[layer, fill=qapanel, below=of api] (service) {Service};
+        \node[layer, fill=qapanel, below=of service] (dao) {DAO};
+        \node[layer, fill=qapanel, below=of dao] (db) {Base de données};
+
+        \node[layer, right=of service, draw=qaaccent2, fill=qapanelalt] (dto) {DTO};
+        \node[layer, right=of dao, draw=qaaccent2, fill=qapanelalt] (entity) {Entité JPA};
+
+        \draw[arrow] (api) -- node[above] {requête} (service);
+        \draw[arrow] (service) -- node[above] {DTO} (dto);
+        \draw[arrow] (service) -- node[left] {appel} (dao);
+        \draw[arrow] (dao) -- node[left] {requête} (db);
+        \draw[arrow] (db) -- node[right] {résultat} (dao);
+        \draw[arrow] (dao) -- node[above] {Entité} (entity);
+        \draw[arrow] (entity) -- node[right] {mapping} (dto);
+        \draw[arrow] (dto) -- node[above] {réponse} (api);
+    \end{tikzpicture}
+    \end{center}
+    \begin{center}
+        \small{Les DTO sont utilisés pour les échanges entre l'API et le service, et entre le service et la vue.}
+    \end{center}
+\end{frame}
+
+\begin{frame}{Cas d'usage concret : Application Web}
+    \begin{block}{Scénario}
+        \begin{itemize}
+            \item Un utilisateur demande la liste des produits via une API REST.
+            \item Le \textbf{Service} appelle le \textbf{DAO} pour récupérer les données.
+            \item Le \textbf{DAO} interroge la base de données et retourne une \textbf{Entité}.
+            \item Le \textbf{Service} convertit l'Entité en \textbf{DTO} et renvoie la réponse.
+        \end{itemize}
+    \end{block}
+\end{frame}
+
+\begin{frame}{Cas d'usage concret : Application Web}    
+    \begin{tikzpicture}[
+        layer/.style={draw=qaaccent, rounded corners, fill=qapanel, text=qatext, font=\small, rectangle, minimum width=2.5cm, minimum height=0.8cm, align=center},
+        arrow/.style={->, >=stealth', thick, qamuted}
+    ]
+        % Première ligne : Client et API
+        \node[layer, fill=qapanel] (client) {Client (Navigateur)};
+        \node[layer, fill=qapanel, right=3cm of client] (api) {API};
+
+        % Deuxième ligne : Service, DAO, BDD
+        \node[layer, fill=qapanel, below=1.5cm of api] (service) {Service};
+        \node[layer, fill=qapanel, left=3.5cm of service] (dao) {DAO};
+        \node[layer, fill=qapanel, below=2cm of dao] (db) {BDD};
+
+        % Flèches entre Client et API (première ligne)
+        \draw[arrow] (client) -- node[above] {GET /products} (api);
+
+        % Flèches de API vers Service (verticale)
+        \draw[arrow] (api) -- node[right] {getAllProducts()} (service);
+
+        % Flèches entre Service, DAO et BDD (deuxième ligne)
+        \draw[arrow] (service) -- node[above] {findAll()} (dao);
+        \draw[arrow] (dao) -- node[right] {SQL} (db);
+
+        % Flèches de retour
+        \draw[arrow] (db) -- node[left] {Produits (Entité)} (dao);
+        \draw[arrow] (dao) -- node[below] {Produits (Entité)} (service);
+        \draw[arrow] (service) -- node[left] {Produits (DTO)} (api);
+        \draw[arrow] (api) -- node[below] {JSON (DTO)} (client);
+    \end{tikzpicture}
+\end{frame}
+
+
+\begin{frame}{Avantages de cette structure}
+    \begin{columns}
+        \column{0.5\textwidth}
+        \begin{block}{DAO}
+            \begin{itemize}
+                \item Découplage de la logique métier et de l'accès aux données.
+                \item Facilite les tests unitaires (mock des DAO).
+                \item Permet de changer de source de données sans impacter le reste.
+            \end{itemize}
+        \end{block}
+        \column{0.5\textwidth}
+        \begin{block}{DTO}
+            \begin{itemize}
+                \item Contrôle précis des données exposées.
+                \item Réduction du trafic réseau (seulement les données nécessaires).
+                \item Sécurité (masquage des données sensibles).
+            \end{itemize}
+        \end{block}
+    \end{columns}
+    \begin{center}
+        \small{DAO + DTO = Architecture modulaire, maintenable et sécurisée.}
+    \end{center}
+\end{frame}
+
+\begin{frame}[fragile]{Structure de dossiers pour une application Java}
+  \begin{columns}[T]
+    \begin{column}{0.42\textwidth}
+\begin{lstlisting}[language={},basicstyle=\lstcode\scriptsize]
+src/
+|-- main/
+|   |-- java/com/monapplication/
+|   |   |-- config/
+|   |   |-- controller/
+|   |   |-- service/
+|   |   |-- model/
+|   |   |   |-- entity/
+|   |   |   |-- dao/
+|   |   |   |-- dto/
+|   |   |   `-- exception/
+|   |   |-- util/
+|   |   `-- Application.java
+|   `-- resources/
+|       |-- application.properties
+|       `-- db/
+`-- test/
+\end{lstlisting}
+    \end{column}
+    \begin{column}{0.54\textwidth}
+      \begin{exampleblock}{Explications}
+        \scriptsize
+\begin{itemize}
+                    \item \texttt{config/}: Configuration de l'application.
+                    \item \texttt{controller/}: Contrôleurs pour les requêtes HTTP.
+                    \item \texttt{service/}: Logique métier.
+                    \item \texttt{model/entity/}: Entités JPA.
+                    \item \texttt{model/dao/}: Accès aux données.
+                    \item \texttt{model/dto/}: Objets de transfert de données.
+                    \item \texttt{model/exception/}: Exceptions personnalisées.
+                    \item \texttt{util/}: Utilitaires et helpers.
+                    \item \texttt{resources/}: Fichiers de configuration et scripts SQL.
+                    \item \texttt{test/}: Tests unitaires et d'intégration.
+                \end{itemize}
+      \end{exampleblock}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+
+\begin{frame}{Bonnes pratiques pour une architecture Java}
+    \begin{block}{Séparation des couches}
+        \begin{itemize}
+            \item \textbf{Contrôleurs} : Gèrent les requêtes HTTP (API REST ou MVC).
+            \item \textbf{Services} : Contiennent la \textbf{logique métier} et utilisent les DAO.
+            \item \textbf{DAO} : Encapsulent les \textbf{requêtes SQL/JPA} et l'accès aux données.
+            \item \textbf{DTO} : Transfèrent les données entre couches \textbf{sans logique métier}.
+            \item \textbf{Entités} : Représentent les \textbf{tables de la base de données} (JPA).
+        \end{itemize}
+    \end{block}
+\end{frame}
+
+
+\begin{frame}{Bonnes pratiques pour une architecture Java -suite-}
+
+    \begin{alertblock}{Règles à respecter}
+        \begin{itemize}
+            \item Ne \textbf{jamais} exposer les entités JPA directement dans une API.
+            \item Utiliser des \textbf{DTO} pour les réponses API.
+            \item Gérer les \textbf{transactions} au niveau des services.
+            \item \textbf{Injecter les dépendances} (ex : \texttt{@Autowired} avec Spring).
+            \item \textbf{Ne pas} appeler un DAO directement depuis un contrôleur.
+        \end{itemize}
+    \end{alertblock}
+
+    \begin{exampleblock}{Exemple de flux}
+        \begin{tikzpicture}[
+            layer/.style={draw=qaaccent, rounded corners, fill=qapanel, text=qatext, font=\small, rectangle, minimum width=2cm, minimum height=0.6cm, align=center},
+            arrow/.style={->, >=stealth', thick, qamuted}
+        ]
+            \node[layer, fill=qapanel] (controller) {Contrôleur};
+            \node[layer, fill=qapanel, right=of controller] (service) {Service};
+            \node[layer, fill=qapanel, right=of service] (dao) {DAO};
+            \node[layer, fill=qapanel, right=of dao] (db) {Bdd};
+            \node[layer, below=of service, draw=qaaccent2, fill=qapanelalt] (dto) {DTO};
+
+            \draw[arrow] (controller) -- node[above] {requête} (service);
+            \draw[arrow] (service) -- node[above] {appel} (dao);
+            \draw[arrow] (dao) -- node[above] {SQL} (db);
+            \draw[arrow] (db) -- node[below] {Entité} (dao);
+            \draw[arrow] (dao) -- node[below] {Entité} (service);
+            \draw[arrow] (service) -- node[right] {DTO} (dto);
+            \draw[arrow] (dto) -- node[below] {réponse} (controller);
+        \end{tikzpicture}
+    \end{exampleblock}
+\end{frame}
+
+
+\begin{frame}{Conclusion}
+    \begin{itemize}
+        \item DAO et DTO sont complémentaires pour une architecture propre.
+        \item DAO gère l'accès aux données, DTO transporte les données.
+        \item Utilisables dans de nombreux langages (Java, TypeScript, Python, etc.).
+    \end{itemize}
+\end{frame}
+
+\begin{frame}{Questions pour vous, alors}
+\begin{enumerate}
+\item Pourquoi utiliser un DAO plutôt que d’écrire des requêtes SQL directement dans le code métier ?
+\item Comment un DTO peut-il améliorer les performances d’une application ?
+\item Quels sont les risques de ne pas utiliser de transactions dans un DAO ?
+\item Comment adapteriez-vous un DAO pour utiliser une base de données NoSQL (ex : MongoDB) ?
+
+\end{enumerate}
+\end{frame}
+
+\rquestionslide
+
+\end{document}

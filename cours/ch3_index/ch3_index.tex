@@ -1,0 +1,260 @@
+\documentclass[aspectratio=169,10pt]{beamer}
+\input{../../latex/common/r307-slides-preamble.tex}
+\graphicspath{{../../latex/common/assets/}}
+
+\title{Index et optimisation}
+\author[C. Tibermacine]{Selena Lamari et Chouki Tibermacine}
+\date{}
+
+\lstdefinestyle{plan}{language={}, basicstyle=\lstcode\scriptsize, keywordstyle={}, commentstyle={}, stringstyle={}}
+
+\tikzset{
+  bnode/.style={rectangle, rounded corners=2pt, draw=qaaccent, thick, fill=qapanel, text=qatext,
+    minimum height=0.5cm, align=center, font=\scriptsize\ttfamily},
+  leaf/.style={bnode, draw=qaaccent2},
+  row/.style={rectangle, draw=qaline, fill=qapanelalt, text=qamuted, minimum width=0.9cm,
+    minimum height=0.4cm, font=\tiny\ttfamily}
+}
+
+\begin{document}
+
+\rtitleslide{3}{Index et optimisation}
+
+% ================================================================
+\section{Comment le SGBD ex\'ecute une requ\^ete}
+
+\begin{frame}{De la requ\^ete SQL au r\'esultat}
+  \begin{itemize}
+    \item SQL est \textbf{d\'eclaratif} : on dit \emph{quoi}, pas \emph{comment}
+    \item L'\textbf{optimiseur} (\textit{planner}) choisit un \textbf{plan d'ex\'ecution} parmi de nombreux possibles :
+      \begin{itemize}
+        \item parcourir toute la table (\textit{Seq Scan}) ou passer par un index (\textit{Index Scan}, \textit{Bitmap Scan}) ?
+        \item quel algorithme de jointure (\textit{Nested Loop}, \textit{Hash Join}, \textit{Merge Join}) ? dans quel ordre ?
+      \end{itemize}
+    \item Il estime un \textbf{co\^ut} pour chaque plan \`a partir de \textbf{statistiques} sur les donn\'ees (\texttt{ANALYZE})
+    \item Le d\'eveloppeur agit sur deux leviers :
+      \begin{enumerate}
+        \item la \textbf{structure physique} : index, types, contraintes
+        \item la \textbf{fa\c{c}on d'interroger} depuis l'application : requ\^etes, lots, pagination, nombre d'allers-retours
+      \end{enumerate}
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Lire un plan : \texttt{EXPLAIN ANALYZE}}
+  Table \texttt{Operation} : 1 million de lignes, aucun index sur \texttt{numCompte}
+\begin{lstlisting}[style=plan]
+EXPLAIN ANALYZE SELECT * FROM Operation WHERE numCompte = 4242;
+
+ Gather  (cost=1000.00..13561.93 rows=6 width=25) (actual time=5.211..18.546 rows=2 loops=1)
+   Workers Planned: 2
+   Workers Launched: 2
+   ->  Parallel Seq Scan on operation  (cost=0.00..12561.33 rows=2 width=25)
+                                       (actual time=10.874..14.583 rows=1 loops=3)
+         Filter: (numcompte = 4242)
+         Rows Removed by Filter: 333333
+ Planning Time: 0.284 ms
+ Execution Time: 18.609 ms
+\end{lstlisting}
+  \begin{itemize}
+    \item \texttt{EXPLAIN} : plan \textbf{estim\'e} ; \texttt{EXPLAIN ANALYZE} : ex\'ecute r\'eellement et mesure
+    \item \texttt{cost} : unit\'e arbitraire ; \texttt{rows} estim\'ees vs r\'eelles ; \texttt{Rows Removed by Filter} : travail gaspill\'e
+    \item Ici : \alert{1 million de lignes lues pour en garder 2}
+  \end{itemize}
+\end{frame}
+
+% ================================================================
+\section{Les index}
+
+\begin{frame}{Un index B-tree}
+  \begin{columns}[c]
+    \begin{column}{0.55\textwidth}
+      \begin{center}
+      \begin{tikzpicture}[level distance=1.0cm, sibling distance=2.1cm]
+        \node[bnode] {2000 | 4000}
+          child[qamuted] {node[leaf] {500 | 1200}}
+          child[qamuted] {node[leaf] {2500 | 3100}}
+          child[qamuted] {node[leaf] {4242 | 4800}};
+        \node[row] (r1) at (-1.8,-2.2) {ligne};
+        \node[row] (r2) at (0,-2.2) {ligne};
+        \node[row] (r3) at (1.8,-2.2) {ligne};
+        \draw[-Latex, qaaccent2, thick] (2.1,-1.25) -- (r3.north);
+        \node[font=\tiny, text=qamuted] at (0,-2.75) {table (tas de lignes, non tri\'ees)};
+      \end{tikzpicture}
+      \end{center}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \begin{itemize}
+        \item Arbre \textbf{tri\'e et \'equilibr\'e} sur la valeur de la colonne
+        \item Recherche en $O(\log n)$ au lieu de $O(n)$
+        \item Sert pour \texttt{=}, \texttt{<}, \texttt{>}, \texttt{BETWEEN}, \texttt{ORDER BY}, jointures
+        \item Type par d\'efaut de \texttt{CREATE INDEX}
+      \end{itemize}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}[fragile]{Cr\'eer un index et mesurer}
+\begin{lstlisting}[language=SQL]
+CREATE INDEX idx_operation_compte ON Operation(numCompte);
+\end{lstlisting}
+\begin{lstlisting}[style=plan]
+ Bitmap Heap Scan on operation  (cost=4.47..28.03 rows=6 width=25) (actual time=0.017..0.019 rows=2 loops=1)
+   Recheck Cond: (numcompte = 4242)
+   ->  Bitmap Index Scan on idx_operation_compte  (cost=0.00..4.47 rows=6 width=0)
+                                                  (actual time=0.013..0.013 rows=2 loops=1)
+         Index Cond: (numcompte = 4242)
+ Execution Time: 0.029 ms
+\end{lstlisting}
+  \begin{datacard}
+    \small
+    \begin{tabular}{@{}lrr@{}}
+      \toprule
+      \textbf{Requ\^ete (mesures PostgreSQL 16, 1 M d'op\'erations)} & \textbf{sans index} & \textbf{avec index} \\
+      \midrule
+      Op\'erations d'un compte & 19 ms & 0,03 ms \\
+      Somme des op\'erations des comptes d'un client & 39 ms & 0,06 ms \\
+      \texttt{DELETE} de 50 comptes (v\'erif. de cl\'e \'etrang\`ere) & \alert{2\,182 ms} & 0,6 ms \\
+      \bottomrule
+    \end{tabular}
+  \end{datacard}
+\end{frame}
+
+\begin{frame}{Quels index existent d\'ej\`a ?}
+  \begin{itemize}
+    \item PostgreSQL cr\'ee \textbf{automatiquement} un index pour chaque \texttt{PRIMARY KEY} et chaque contrainte \texttt{UNIQUE}
+    \item Il \alert{ne cr\'ee pas} d'index sur les \textbf{cl\'es \'etrang\`eres} :
+      \begin{itemize}
+        \item jointures et recherches \og les op\'erations du compte X \fg{} : parcours complet
+        \item \texttt{DELETE}/\texttt{UPDATE} sur la table r\'ef\'erenc\'ee : pour chaque ligne supprim\'ee, la base v\'erifie la table fille\ldots{} en la parcourant enti\`erement
+      \end{itemize}
+    \item[$\Rightarrow$] R\`egle pratique : \textbf{indexer les colonnes de cl\'e \'etrang\`ere} utilis\'ees dans les jointures
+    \item Lister les index : \texttt{\textbackslash di} dans \texttt{psql}, ou la vue \texttt{pg\_indexes}
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Quand l'index n'est pas utilis\'e}
+  \begin{columns}[T]
+    \begin{column}{0.5\textwidth}
+      \textbf{Fonction appliqu\'ee \`a la colonne}
+\begin{lstlisting}[language=SQL]
+-- index sur nomClient ignore :
+WHERE lower(nomClient) = 'dupont'
+-- solution : index sur l'expression
+CREATE INDEX ON Client(lower(nomClient));
+\end{lstlisting}
+      \textbf{\texttt{LIKE} par pr\'efixe}
+\begin{lstlisting}[language=SQL]
+-- ignore avec une collation fr/en :
+WHERE nomClient LIKE 'Dup%'
+CREATE INDEX ON Client
+  (nomClient varchar_pattern_ops);
+-- '%pont' : aucun B-tree ne peut aider
+\end{lstlisting}
+    \end{column}
+    \begin{column}{0.47\textwidth}
+      \textbf{Index composite : l'ordre compte}
+\begin{lstlisting}[language=SQL]
+CREATE INDEX ON Operation
+  (numCompte, dateOperation);
+-- utilise :
+WHERE numCompte = 3 AND dateOperation > ?
+WHERE numCompte = 3
+-- PAS utilise (2e colonne seule) :
+WHERE dateOperation = ?
+\end{lstlisting}
+      \textbf{Faible s\'electivit\'e}
+      \begin{itemize}
+        \item \texttt{typeOperation = 'DEPOT'} : 1 ligne sur 3
+        \item l'index aide peu (54 ms $\to$ 28 ms) ; l'optimiseur pr\'ef\`ere parfois le parcours complet
+      \end{itemize}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Un index a un co\^ut}
+  \begin{itemize}
+    \item Chaque \texttt{INSERT}, \texttt{UPDATE}, \texttt{DELETE} doit aussi \textbf{mettre \`a jour tous les index} de la table
+    \item Mesure : insertion de 300\,000 op\'erations
+      \begin{itemize}
+        \item sans index secondaire : \textbf{0,13 s}
+        \item avec 4 index secondaires : \alert{\textbf{1,3 s}} (10 fois plus lent)
+      \end{itemize}
+    \item Les index occupent de l'espace disque et de la m\'emoire
+  \end{itemize}
+  \begin{block}{D\'emarche}
+    \begin{enumerate}
+      \item identifier les requ\^etes \textbf{fr\'equentes} ou \textbf{lentes} de l'application
+      \item les analyser avec \texttt{EXPLAIN ANALYZE}
+      \item cr\'eer l'index qui correspond \textbf{exactement} \`a la clause \texttt{WHERE}/\texttt{JOIN}/\texttt{ORDER BY}
+      \item re-mesurer ; supprimer les index inutiles
+    \end{enumerate}
+  \end{block}
+\end{frame}
+
+% ================================================================
+\section{Optimiser c\^ot\'e application}
+
+\begin{frame}[fragile]{R\'eduire les allers-retours : les lots (\textit{batch})}
+\begin{lstlisting}[language=Java]
+c.setAutoCommit(false);                       // une seule transaction
+try (PreparedStatement ps = c.prepareStatement(
+      "INSERT INTO Operation VALUES (?, ?, ?, ?, ?)")) {
+  for (Operation op : operations) {
+    ps.setInt(1, op.getNum()); /* ... */
+    ps.addBatch();                             // empile au lieu d'envoyer
+    if (++n % 1000 == 0) ps.executeBatch();    // envoie par paquets de 1000
+  }
+  ps.executeBatch();
+}
+c.commit();
+\end{lstlisting}
+  \begin{itemize}
+    \item Une requ\^ete = un aller-retour r\'eseau + (en autocommit) une \'ecriture disque synchrone
+    \item Avec le pilote PostgreSQL, ajouter \texttt{?reWriteBatchedInserts=true} \`a l'URL JDBC
+      regroupe les lignes en \texttt{INSERT} multi-valeurs
+    \item Gain typique : un \textbf{ordre de grandeur} ou plus (\`a mesurer en TP)
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Pagination : \texttt{OFFSET} vs pagination par cl\'e}
+  \begin{columns}[T]
+    \begin{column}{0.48\textwidth}
+\begin{lstlisting}[language=SQL]
+-- page 45 001 : lit et jette 900 000 lignes
+SELECT * FROM Operation
+ ORDER BY numOperation
+ LIMIT 20 OFFSET 900000;
+\end{lstlisting}
+      \centering\alert{79 ms}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+\begin{lstlisting}[language=SQL]
+-- on part de la derniere cle affichee
+SELECT * FROM Operation
+ WHERE numOperation > 900000
+ ORDER BY numOperation LIMIT 20;
+\end{lstlisting}
+      \centering\textbf{0,02 ms}
+    \end{column}
+  \end{columns}
+  \vspace{3mm}
+  \begin{itemize}
+    \item \texttt{OFFSET} est simple mais son co\^ut cro\^it avec le num\'ero de page
+    \item La pagination par cl\'e (\textit{keyset}) utilise l'index et reste constante
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Autres r\`egles d'hygi\`ene}
+  \begin{itemize}
+    \item \texttt{PreparedStatement} partout : s\'ecurit\'e (injection SQL) et r\'eutilisation du plan par le serveur
+    \item S\'electionner \textbf{les colonnes utiles} plut\^ot que \texttt{SELECT *}
+    \item Filtrer, trier, agr\'eger \textbf{en SQL} plut\^ot qu'en Java (ne pas rapatrier 1 M de lignes pour en compter 10)
+    \item \'Eviter les requ\^etes dans une boucle : le probl\`eme \og \textbf{N+1} \fg{} (on le retrouvera avec JPA : TP4 et chapitre 6)
+    \item R\'eutiliser les connexions : \textbf{pool} (HikariCP)
+    \item Mesurer avant d'optimiser : \texttt{EXPLAIN ANALYZE}, \texttt{System.nanoTime()}, \texttt{pg\_stat\_statements}
+  \end{itemize}
+\end{frame}
+
+\rquestionslide
+
+\end{document}

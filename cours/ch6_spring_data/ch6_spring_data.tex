@@ -1,0 +1,395 @@
+\documentclass[aspectratio=169,10pt]{beamer}
+\input{../../latex/common/r307-slides-preamble.tex}
+\graphicspath{{../../latex/common/assets/}}
+
+\title{Patron Repository et Spring Data JPA}
+\author[C. Tibermacine]{Selena Lamari et Chouki Tibermacine}
+\date{}
+
+% SQL genere par Hibernate (sortie de spring.jpa.show-sql)
+\lstdefinestyle{log}{language=SQL, basicstyle=\lstcode\scriptsize, backgroundcolor=\color{qapanel},
+  keywordstyle=\color{qacodekw}, commentstyle=\color{qacodecom}}
+
+\tikzset{
+  comp/.style={rectangle, rounded corners, draw=qaaccent, thick, fill=qapanel, text=qatext,
+    minimum width=3.2cm, minimum height=0.8cm, align=center, font=\scriptsize},
+  itf/.style={comp, draw=qaaccent2},
+  dep/.style={-Latex, thick, qamuted},
+  real/.style={-{Latex[open]}, thick, dashed, qamuted}
+}
+
+\begin{document}
+
+\rtitleslide{6}{Patron Repository et Spring Data JPA}
+
+% ================================================================
+\section{Du DAO au Repository}
+
+\begin{frame}{O\`u en est-on ?}
+  \begin{datacard}
+    \small
+    \begin{tabular}{@{}lp{5.2cm}p{5.2cm}@{}}
+      \toprule
+      \textbf{\'Etape} & \textbf{Ce qu'on \'ecrit} & \textbf{Ce qui est g\'en\'er\'e} \\
+      \midrule
+      JDBC (ch.\,1) & SQL, \texttt{PreparedStatement}, mapping \`a la main & --- \\
+      DAO (ch.\,5) & une classe par table, SQL ou JPQL & --- \\
+      JPA (ch.\,4) & entit\'es annot\'ees, JPQL & le SQL CRUD \\
+      Repository (TP5) & une interface \textbf{m\'etier} + son impl\'ementation JPA & le SQL CRUD \\
+      \alert{Spring Data} & \alert{l'interface seulement} & le SQL \textbf{et} l'impl\'ementation \\
+      \bottomrule
+    \end{tabular}
+  \end{datacard}
+  \vspace{2mm}
+  \begin{itemize}
+    \item DAO : vocabulaire \textbf{technique}, une classe par table (\texttt{insertClient}, \texttt{updateClient})
+    \item Repository : une \textbf{collection d'objets m\'etier} dont on ignore le stockage (\texttt{save}, \texttt{findById}, \texttt{findComptesDuClient})
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Le Repository inverse la d\'ependance}
+  \begin{center}
+  \begin{tikzpicture}
+    \node[comp] (svc) at (0,0) {BanqueService\\{\tiny(m\'etier)}};
+    \node[itf]  (rep) at (5,0) {\guillemotleft interface\guillemotright\\ClientRepository};
+    \node[comp] (jpa) at (2.6,-2) {ClientRepositoryJPA\\{\tiny(EntityManager)}};
+    \node[comp] (mem) at (7.4,-2) {ClientRepositoryMemoire\\{\tiny(HashMap, pour les tests)}};
+    \draw[dep] (svc) -- node[above, font=\tiny, text=qamuted] {utilise} (rep);
+    \draw[real] (jpa) -- (rep);
+    \draw[real] (mem) -- (rep);
+  \end{tikzpicture}
+  \end{center}
+  \begin{itemize}
+    \item Le service ne conna\^it que l'\textbf{interface} : ni SQL, ni JPA, ni \texttt{EntityManager}
+    \item On peut changer de technique de persistance sans toucher au m\'etier
+    \item On peut \textbf{tester le m\'etier sans base de donn\'ees}
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Tester le m\'etier sans base}
+\begin{lstlisting}[language=Java]
+class ClientRepositoryMemoire implements ClientRepository {
+  private final Map<Integer, Client> donnees = new HashMap<>();
+  public void save(Client c)                 { donnees.put(c.getId(), c); }
+  public Optional<Client> findById(int id)   { return Optional.ofNullable(donnees.get(id)); }
+  public List<Client> findAll()              { return new ArrayList<>(donnees.values()); }
+  public List<Compte> findComptesByClient(int id) {
+    return findById(id).map(Client::getComptes).orElse(List.of());
+  }
+}
+
+@Test void soldeTotalDUnClient() {
+  ClientRepository repo = new ClientRepositoryMemoire();
+  repo.save(clientAvecDeuxComptes(1, 100, 50));
+  assertEquals(150, new BanqueService(repo).soldeTotal(1));   // aucun Docker, aucun SQL
+}
+\end{lstlisting}
+\end{frame}
+
+\begin{frame}[fragile]{Ce qui se r\'ep\`ete d'un Repository \`a l'autre}
+  \begin{columns}[T]
+    \begin{column}{0.5\textwidth}
+\begin{lstlisting}[language=Java]
+public Optional<Client> findById(int id) {
+  return Optional.ofNullable(
+      em.find(Client.class, id));
+}
+public List<Client> findByVille(String v) {
+  return em.createQuery(
+      "SELECT c FROM Client c WHERE c.ville = :v",
+      Client.class)
+    .setParameter("v", v).getResultList();
+}
+\end{lstlisting}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{itemize}
+        \item Le m\^eme code pour \texttt{Client}, \texttt{Compte}, \texttt{Operation}\ldots
+        \item La requ\^ete se d\'eduit du \textbf{nom} de la m\'ethode
+        \item[$\Rightarrow$] Un framework peut l'\'ecrire \`a notre place : \alert{Spring Data}
+      \end{itemize}
+      \vspace{2mm}
+      {\small\color{qamuted} Dans le TP5, vous \'ecrivez cette impl\'ementation \`a la main pour comprendre ce que Spring Data g\'en\`ere.}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ================================================================
+\section{Spring Data JPA}
+
+\begin{frame}[fragile]{Mise en place (Spring Boot)}
+  \begin{columns}[T]
+    \begin{column}{0.5\textwidth}
+      \textbf{\texttt{pom.xml}}
+\begin{lstlisting}[language=XML]
+<dependency>
+  <groupId>org.springframework.boot</groupId>
+  <artifactId>spring-boot-starter-data-jpa</artifactId>
+</dependency>
+<dependency>
+  <groupId>org.postgresql</groupId>
+  <artifactId>postgresql</artifactId>
+  <scope>runtime</scope>
+</dependency>
+\end{lstlisting}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \textbf{\texttt{application.properties}}
+\begin{lstlisting}[language={}]
+spring.datasource.url=jdbc:postgresql://localhost:5432/banque_db
+spring.datasource.username=${DB_USER}
+spring.datasource.password=${DB_PASSWORD}
+spring.jpa.hibernate.ddl-auto=validate
+spring.jpa.show-sql=true
+\end{lstlisting}
+      \begin{itemize}
+        \item Plus de \texttt{persistence.xml} ni d'\texttt{EntityManagerFactory} \`a cr\'eer
+        \item Pool de connexions (HikariCP) fourni
+        \item Les entit\'es JPA du chapitre 4 sont r\'eutilis\'ees telles quelles
+      \end{itemize}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}[fragile]{D\'eclarer un Repository : une interface suffit}
+\begin{lstlisting}[language=Java]
+public interface ClientRepository extends JpaRepository<Client, Integer> {
+  // rien a ecrire pour le CRUD
+}
+
+@Service
+public class BanqueService {
+  private final ClientRepository clients;
+  public BanqueService(ClientRepository clients) {   // injection par constructeur
+    this.clients = clients;
+  }
+}
+\end{lstlisting}
+  \begin{itemize}
+    \item Au d\'emarrage, Spring \textbf{g\'en\`ere une classe} qui impl\'emente l'interface et l'injecte
+    \item M\'ethodes h\'erit\'ees : \texttt{save}, \texttt{saveAll}, \texttt{findById}, \texttt{findAll}, \texttt{existsById}, \texttt{count},
+      \texttt{deleteById}, \texttt{findAll(Pageable)}, \texttt{findAll(Sort)}\ldots
+    \item \texttt{Client} et \texttt{Integer} : type de l'entit\'e et type de sa cl\'e primaire
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Requ\^etes d\'eriv\'ees du nom de la m\'ethode}
+\begin{lstlisting}[language=Java]
+List<Client>  findByVille(String ville);
+List<Client>  findByNomClientStartingWithOrderByNomClientAsc(String prefixe);
+long          countByVille(String ville);
+boolean       existsByNomClient(String nom);
+List<Compte>  findByClientNumClient(int numClient);         // dans CompteRepository
+List<Compte>  findBySoldeGreaterThanEqual(BigDecimal min);
+\end{lstlisting}
+  SQL r\'eellement g\'en\'er\'e par Hibernate (extraits du journal) :
+\begin{lstlisting}[style=log]
+select ... from client c1_0 where c1_0.ville=?
+select ... from client c1_0 where c1_0.nom_client like ? escape '\' order by c1_0.nom_client
+select count(c1_0.num_client) from client c1_0 where c1_0.ville=?
+select ... from compte c1_0 left join client c2_0 on c2_0.num_client=c1_0.num_client where c2_0.num_client=?
+\end{lstlisting}
+  \begin{itemize}
+    \item Mots-cl\'es : \texttt{And}, \texttt{Or}, \texttt{Between}, \texttt{LessThan}, \texttt{Like}, \texttt{In}, \texttt{IsNull}, \texttt{OrderBy}, \texttt{First10}\ldots
+    \item Un nom mal form\'e ou une propri\'et\'e inconnue : erreur \textbf{au d\'emarrage}, pas \`a l'ex\'ecution
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Quand le nom devient trop long : \texttt{@Query}}
+\begin{lstlisting}[language=Java]
+@Query("SELECT c FROM Client c WHERE size(c.comptes) >= :n")          // JPQL
+List<Client> avecAuMoins(@Param("n") int n);
+
+@Query(value = "SELECT * FROM client WHERE ville = ?1 LIMIT 5",      // SQL natif
+       nativeQuery = true)
+List<Client> cinqClientsDe(String ville);
+
+@Modifying                                                           // UPDATE / DELETE
+@Query("UPDATE Compte c SET c.solde = c.solde - :m WHERE c.numCompte = :num AND c.solde >= :m")
+int debiter(@Param("num") int num, @Param("m") BigDecimal m);         // nb de lignes modifiees
+\end{lstlisting}
+  \begin{itemize}
+    \item \texttt{@Modifying} : mise \`a jour relative du chapitre 2 (\texttt{solde = solde - ?}), ex\'ecut\'ee dans une transaction
+    \item \alert{Attention} : une requ\^ete \texttt{@Modifying} \textbf{contourne} le contexte de persistance et le compteur \texttt{@Version}
+      (v\'erifi\'e : la version du compte reste \`a 0)
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Projections : ne charger que l'utile (DTO, chapitre 5)}
+\begin{lstlisting}[language=Java]
+public interface ClientResume {          // projection : seulement des getters
+  String getNomClient();
+  String getVille();
+}
+List<ClientResume> findByVilleOrderByNomClient(String ville);
+\end{lstlisting}
+\begin{lstlisting}[style=log]
+select c1_0.nom_client,c1_0.ville from client c1_0 where c1_0.ville=? order by 1
+\end{lstlisting}
+  \begin{itemize}
+    \item Seules les colonnes demand\'ees sont lues (chapitre 3 : \og pas de \texttt{SELECT *} \fg{})
+    \item Variante : un \texttt{record} Java comme type de retour
+    \item Le service renvoie ces projections ou des DTO, jamais les entit\'es, \`a la couche pr\'esentation
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Pagination : \texttt{Page} (OFFSET) ou \texttt{Window} (par cl\'e)}
+  \textbf{Par num\'ero de page}
+\begin{lstlisting}[language=Java,basicstyle=\lstcode\scriptsize]
+Page<Client> findByVille(String v, Pageable p);
+Page<Client> page = repo.findByVille("Vannes", PageRequest.of(1, 20, Sort.by("nomClient")));
+\end{lstlisting}
+\begin{lstlisting}[style=log]
+select ... where c1_0.ville=? order by c1_0.nom_client offset ? rows fetch first ? rows only
+\end{lstlisting}
+  \textbf{Par cl\'e (Spring Data 3.1+)}
+\begin{lstlisting}[language=Java,basicstyle=\lstcode\scriptsize]
+Window<Client> findFirst20ByVilleOrderByNumClient(String v, ScrollPosition pos);
+Window<Client> w = repo.findFirst20ByVilleOrderByNumClient("Vannes", ScrollPosition.keyset());
+w = repo.findFirst20ByVilleOrderByNumClient("Vannes", w.positionAt(w.size() - 1));  // page suivante
+\end{lstlisting}
+\begin{lstlisting}[style=log]
+select ... where c1_0.ville=? and (c1_0.num_client>?) order by c1_0.num_client fetch first ? rows only
+\end{lstlisting}
+  {\small \texttt{Page} est pratique (num\'ero de page, nombre total) mais repose sur \texttt{OFFSET}, lent sur les pages lointaines
+  (chapitre 3). \texttt{Window} produit la pagination par cl\'e.}
+\end{frame}
+
+% ================================================================
+\section{Transactions et concurrence avec Spring}
+
+\begin{frame}[fragile]{\texttt{@Transactional} sur la couche service}
+\begin{lstlisting}[language=Java]
+@Service
+public class BanqueService {
+  @Transactional                                        // BEGIN ... COMMIT / ROLLBACK
+  public void virer(int src, int dst, BigDecimal montant) {
+    if (comptes.debiter(src, montant) == 0) throw new SoldeInsuffisantException(src);
+    comptes.crediter(dst, montant);
+    operations.save(new Operation(src, dst, montant));
+  }
+  @Transactional(readOnly = true)
+  public BigDecimal soldeTotal(int numClient) { ... }
+}
+\end{lstlisting}
+  \begin{itemize}
+    \item Remplace le sch\'ema \texttt{setAutoCommit(false)} / \texttt{commit()} / \texttt{rollback()} du chapitre 2
+    \item Rollback par d\'efaut sur les exceptions \textbf{non v\'erifi\'ees} (\texttt{RuntimeException}) seulement ;
+      sinon : \texttt{@Transactional(rollbackFor = Exception.class)}
+    \item Niveau d'isolation : \texttt{@Transactional(isolation = Isolation.REPEATABLE\_READ)}
+    \item Sans effet sur une m\'ethode \texttt{private} et lors d'un appel interne (\texttt{this.virer(\ldots)}) : la transaction est pos\'ee par un \textbf{proxy} autour du bean
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Verrou optimiste : \texttt{@Version}}
+  \begin{columns}[T]
+    \begin{column}{0.42\textwidth}
+\begin{lstlisting}[language=Java]
+@Entity
+public class Compte {
+  @Id private Integer numCompte;
+  private BigDecimal solde;
+  @Version private int version;
+  ...
+}
+\end{lstlisting}
+    \end{column}
+    \begin{column}{0.55\textwidth}
+\begin{lstlisting}[style=log]
+update compte set num_client=?,solde=?,version=?
+ where num_compte=? and version=?
+\end{lstlisting}
+      Si la ligne a chang\'e depuis la lecture :\\[1mm]
+      \texttt{\footnotesize ObjectOptimisticLockingFailureException:}\\
+      \texttt{\footnotesize Row was updated or deleted by another transaction}
+    \end{column}
+  \end{columns}
+  \vspace{2mm}
+  \begin{itemize}
+    \item C'est la \og solution 3 \fg{} du chapitre 2, \'ecrite par Hibernate
+    \item \`A attraper dans le contr\^oleur : message \og donn\'ees modifi\'ees entre-temps, rechargez \fg{} ou nouvelle tentative
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Verrou pessimiste : \texttt{@Lock}}
+\begin{lstlisting}[language=Java]
+@Lock(LockModeType.PESSIMISTIC_WRITE)
+@Query("SELECT c FROM Compte c WHERE c.numCompte = :num")
+Optional<Compte> findPourMaj(@Param("num") int num);
+\end{lstlisting}
+\begin{lstlisting}[style=log]
+select ... from compte c1_0 where c1_0.num_compte=? for no key update
+\end{lstlisting}
+  \begin{itemize}
+    \item \og Solution 2 \fg{} du chapitre 2. Sur PostgreSQL, Hibernate produit \texttt{FOR NO KEY UPDATE}, une variante de
+      \texttt{FOR UPDATE} qui ne bloque pas les insertions de lignes filles r\'ef\'eren\c{c}ant ce compte
+    \item Appel\'ee hors transaction : \texttt{InvalidDataAccessApiUsageException: Query requires transaction be in progress}
+  \end{itemize}
+\end{frame}
+
+% ================================================================
+\section{Performances}
+
+\begin{frame}[fragile]{Le probl\`eme N+1 et \texttt{@EntityGraph}}
+  \begin{columns}[T]
+    \begin{column}{0.49\textwidth}
+\begin{lstlisting}[language=Java]
+for (Client c : repo.findByVille("Vannes"))
+  System.out.println(c.getComptes().size());
+\end{lstlisting}
+\begin{lstlisting}[style=log]
+select ... from client c1_0 where c1_0.ville=?
+select ... from compte c1_0 where c1_0.num_client=?
+select ... from compte c1_0 where c1_0.num_client=?
+select ... from compte c1_0 where c1_0.num_client=?
+\end{lstlisting}
+      \centering\alert{1 + N requ\^etes}
+    \end{column}
+    \begin{column}{0.49\textwidth}
+\begin{lstlisting}[language=Java]
+@EntityGraph(attributePaths = "comptes")
+List<Client> findWithComptesByVille(String v);
+\end{lstlisting}
+\begin{lstlisting}[style=log]
+select ... from client c1_0
+  left join compte c2_0
+    on c1_0.num_client=c2_0.num_client
+ where c1_0.ville=?
+\end{lstlisting}
+      \centering\textbf{1 requ\^ete}
+    \end{column}
+  \end{columns}
+  \vspace{2mm}
+  {\small Toujours activer \texttt{spring.jpa.show-sql} en d\'eveloppement et \textbf{compter} les requ\^etes. Alternative : \texttt{JOIN FETCH} dans un \texttt{@Query}.}
+\end{frame}
+
+\begin{frame}[fragile]{Quand revenir au SQL}
+  \begin{itemize}
+    \item Requ\^etes analytiques complexes (fen\^etres, CTE r\'ecursives) : \texttt{@Query(nativeQuery = true)}
+    \item Traitements de masse : un seul \texttt{UPDATE} plut\^ot que charger 100\,000 entit\'es
+    \item Logique ex\'ecut\'ee dans la base (chapitre 7) :
+  \end{itemize}
+\begin{lstlisting}[language=Java]
+@Modifying
+@Query(value = "CALL virement(:src, :dst, CAST(:m AS NUMERIC))", nativeQuery = true)
+void virement(@Param("src") int src, @Param("dst") int dst, @Param("m") BigDecimal m);
+\end{lstlisting}
+  \begin{itemize}
+    \item Spring Data ne masque pas la base : il faut savoir lire le SQL qu'il produit (chapitres 1 \`a 3)
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{\`A retenir}
+  \begin{itemize}
+    \item Repository = interface \textbf{m\'etier} ; le service en d\'epend, jamais de JPA
+    \item Spring Data g\'en\`ere l'impl\'ementation : CRUD h\'erit\'e, requ\^etes d\'eriv\'ees, \texttt{@Query}
+    \item Projections pour ne lire que l'utile ; \texttt{Window} pour paginer sans \texttt{OFFSET}
+    \item \texttt{@Transactional} sur le service, \texttt{@Version} (optimiste) ou \texttt{@Lock} (pessimiste) contre les mises \`a jour perdues
+    \item \texttt{@EntityGraph} ou \texttt{JOIN FETCH} contre le N+1
+    \item Toujours v\'erifier le SQL g\'en\'er\'e
+  \end{itemize}
+\end{frame}
+
+\rquestionslide
+
+\end{document}

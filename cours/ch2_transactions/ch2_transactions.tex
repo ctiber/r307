@@ -1,0 +1,353 @@
+\documentclass[aspectratio=169,10pt]{beamer}
+\input{../../latex/common/r307-slides-preamble.tex}
+\graphicspath{{../../latex/common/assets/}}
+
+\title{Transactions et concurrence d'acc\`es}
+\author[C. Tibermacine]{Selena Lamari et Chouki Tibermacine}
+\date{}
+
+\tikzset{
+  tx/.style={rectangle, rounded corners, draw=qaaccent, thick, fill=qapanel, text=qatext,
+    minimum width=3.6cm, minimum height=0.55cm, align=center, font=\scriptsize\ttfamily},
+  txb/.style={tx, draw=qaaccent2},
+  db/.style={rectangle, rounded corners, draw=qaline, fill=qapanelalt, text=qatext,
+    minimum width=2.4cm, minimum height=0.55cm, align=center, font=\scriptsize},
+  timeline/.style={-Latex, thick, qamuted}
+}
+
+\begin{document}
+
+\rtitleslide{2}{Transactions et concurrence d'acc\`es}
+
+% ================================================================
+\section{Transactions : rappels}
+
+\begin{frame}{Qu'est-ce qu'une transaction ?}
+  \begin{block}{D\'efinition}
+    Une \textbf{transaction} est une suite d'op\'erations sur la base qui forme une \textbf{unit\'e logique de travail} :
+    soit tout est appliqu\'e (\texttt{COMMIT}), soit rien (\texttt{ROLLBACK}).
+  \end{block}
+  \begin{columns}[T]
+    \begin{column}{0.48\textwidth}
+      \begin{exampleblock}{Propri\'et\'es ACID}
+        \begin{itemize}
+          \item \textbf{A}tomicit\'e : tout ou rien
+          \item \textbf{C}oh\'erence : les contraintes restent vraies
+          \item \textbf{I}solation : les transactions concurrentes ne se g\^enent pas (\alert{\`a quel point ?})
+          \item \textbf{D}urabilit\'e : un \texttt{COMMIT} survit \`a une panne
+        \end{itemize}
+      \end{exampleblock}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \begin{exampleblock}{Exemple : virement}
+        \begin{enumerate}
+          \item d\'ebiter le compte A
+          \item cr\'editer le compte B
+          \item journaliser l'op\'eration
+        \end{enumerate}
+        Une panne entre 1 et 2 ne doit pas faire \og dispara\^itre \fg{} d'argent.
+      \end{exampleblock}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}[fragile]{Transactions en JDBC : le sch\'ema \`a retenir}
+\begin{lstlisting}[language=Java]
+try (Connection c = dataSource.getConnection()) {
+  c.setAutoCommit(false);              // par defaut : autocommit apres CHAQUE requete
+  try {
+    debiter(c, src, montant);
+    crediter(c, dst, montant);
+    c.commit();                        // tout est valide
+  } catch (SQLException e) {
+    c.rollback();                      // rien n'est applique
+    throw e;
+  }
+}                                      // close() rend la connexion au pool
+\end{lstlisting}
+  \begin{itemize}
+    \item Toutes les requ\^etes d'une transaction utilisent la \alert{m\^eme} \texttt{Connection}
+    \item Points de reprise partiels possibles : \texttt{Savepoint sp = c.setSavepoint(); \ldots{} c.rollback(sp);}
+  \end{itemize}
+\end{frame}
+
+% ================================================================
+\section{Concurrence d'acc\`es}
+
+\begin{frame}{Pourquoi la concurrence est in\'evitable}
+  \begin{itemize}
+    \item Une application web ou mobile sert \textbf{plusieurs utilisateurs en m\^eme temps}
+    \item Chaque requ\^ete HTTP est trait\'ee par un \textbf{thread} diff\'erent, avec sa propre connexion (pool)
+    \item Plusieurs transactions lisent et \'ecrivent donc les \textbf{m\^emes lignes} au m\^eme moment
+  \end{itemize}
+  \vspace{2mm}
+  \begin{alertblock}{Question}
+    Deux guichets d\'ebitent le m\^eme compte (1000\,\texteuro{}) au m\^eme instant : $-100$ et $-50$.
+    Quel est le solde final ? \only<2>{\alert{Pas forc\'ement 850\,\texteuro{}\ldots}}
+  \end{alertblock}
+\end{frame}
+
+\begin{frame}{L'anomalie la plus courante : la mise \`a jour perdue}
+  \begin{center}
+  \begin{tikzpicture}[node distance=0.25cm]
+    \node[font=\small\bfseries, text=qaaccent] (h1) at (0,0) {Transaction T1 (guichet 1)};
+    \node[font=\small\bfseries, text=qaaccent2] (h2) at (7,0) {Transaction T2 (guichet 2)};
+    \node[db] (hb) at (3.5,0) {solde en base};
+    \node[tx]  (a1) at (0,-0.8) {SELECT solde $\to$ 1000};
+    \node[db]  (b1) at (3.5,-0.8) {1000};
+    \node[txb] (c1) at (7,-1.5) {SELECT solde $\to$ 1000};
+    \node[db]  (b2) at (3.5,-1.5) {1000};
+    \node[txb] (c2) at (7,-2.2) {UPDATE solde = 1000-50};
+    \node[txb] (c3) at (7,-2.9) {COMMIT};
+    \node[db]  (b3) at (3.5,-2.9) {950};
+    \node[tx]  (a2) at (0,-3.6) {UPDATE solde = 1000-100};
+    \node[tx]  (a3) at (0,-4.3) {COMMIT};
+    \node[db, draw=qaaccent2, text=qaaccent2]  (b4) at (3.5,-4.3) {\textbf{900} (au lieu de 850)};
+    \draw[timeline] (-2.4,-0.4) -- node[left, font=\scriptsize, text=qamuted, rotate=90, anchor=south] {temps} (-2.4,-4.6);
+  \end{tikzpicture}
+  \end{center}
+  \begin{itemize}
+    \item Chaque transaction calcule le nouveau solde \textbf{dans le code Java} \`a partir d'une valeur lue trop t\^ot
+    \item C'est le niveau d'isolation \textbf{par d\'efaut} de PostgreSQL (\texttt{READ COMMITTED}) : \alert{test\'e, r\'esultat 900}
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Les anomalies de lecture (norme SQL)}
+  \begin{datacard}
+    \small
+    \begin{tabular}{@{}p{3.2cm}p{9.2cm}@{}}
+      \toprule
+      \textbf{Anomalie} & \textbf{Ce qui se passe} \\
+      \midrule
+      Lecture sale & T1 lit une valeur modifi\'ee par T2 \textbf{non encore valid\'ee} ; T2 fait ensuite \texttt{ROLLBACK} \\
+      Lecture non r\'ep\'etable & T1 lit deux fois la m\^eme ligne et obtient deux valeurs diff\'erentes (T2 a valid\'e entre-temps) \\
+      Lecture fant\^ome & T1 relance une requ\^ete et voit des \textbf{lignes en plus ou en moins} (insertion/suppression de T2) \\
+      Mise \`a jour perdue & T1 et T2 lisent puis \'ecrivent la m\^eme ligne : l'\'ecriture de l'une \'ecrase celle de l'autre \\
+      \bottomrule
+    \end{tabular}
+  \end{datacard}
+\end{frame}
+
+% ================================================================
+\section{Niveaux d'isolation}
+
+\begin{frame}{Les quatre niveaux d'isolation}
+  \begin{datacard}
+    \small
+    \begin{tabular}{@{}lcccc@{}}
+      \toprule
+      \textbf{Niveau} & \textbf{Lect. sale} & \textbf{Non r\'ep\'etable} & \textbf{Fant\^ome} & \textbf{M\`aj perdue} \\
+      \midrule
+      \texttt{READ UNCOMMITTED} & possible$^{*}$ & possible & possible & possible \\
+      \texttt{READ COMMITTED} (d\'efaut PG) & --- & possible & possible & \alert{possible} \\
+      \texttt{REPEATABLE READ} & --- & --- & possible$^{*}$ & d\'etect\'ee \\
+      \texttt{SERIALIZABLE} & --- & --- & --- & d\'etect\'ee \\
+      \bottomrule
+    \end{tabular}
+  \end{datacard}
+  \vspace{1mm}
+  {\footnotesize\color{qamuted} $^{*}$ selon la norme. PostgreSQL est plus strict : \texttt{READ UNCOMMITTED} s'y comporte comme \texttt{READ COMMITTED}
+  (jamais de lecture sale), et \texttt{REPEATABLE READ} y emp\^eche aussi les fant\^omes.}
+  \begin{itemize}
+    \item Plus le niveau est \'elev\'e, plus il y a de transactions \textbf{refus\'ees} ou \textbf{bloqu\'ees} : on paie l'isolation en d\'ebit
+    \item PostgreSQL utilise le \textbf{MVCC} : chaque transaction lit une \og photo \fg{} (snapshot) de la base ; les lecteurs ne bloquent jamais les \'ecrivains
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Choisir le niveau d'isolation}
+  \begin{columns}[T]
+    \begin{column}{0.48\textwidth}
+      \textbf{En SQL}
+\begin{lstlisting}[language=SQL]
+BEGIN ISOLATION LEVEL REPEATABLE READ;
+SELECT solde FROM Compte
+ WHERE numCompte = 1;
+UPDATE Compte SET solde = 900
+ WHERE numCompte = 1;
+COMMIT;
+\end{lstlisting}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \textbf{En JDBC}
+\begin{lstlisting}[language=Java]
+c.setAutoCommit(false);
+c.setTransactionIsolation(
+  Connection.TRANSACTION_REPEATABLE_READ);
+// ... requetes ...
+c.commit();
+\end{lstlisting}
+    \end{column}
+  \end{columns}
+  \vspace{2mm}
+  \begin{block}{Ce qu'on a observ\'e sur PostgreSQL (sc\'enario du guichet)}
+    \begin{itemize}
+      \item \texttt{READ COMMITTED} : solde final 900 \hfill \alert{mise \`a jour perdue}
+      \item \texttt{REPEATABLE READ} : T1 re\c{c}oit \texttt{ERROR: could not serialize access due to concurrent update} \hfill SQLState \texttt{40001}
+    \end{itemize}
+    $\Rightarrow$ \`a un niveau \'elev\'e, l'application doit \textbf{rejouer} la transaction refus\'ee
+  \end{block}
+\end{frame}
+
+% ================================================================
+\section{\'Eviter les mises \`a jour perdues}
+
+\begin{frame}[fragile]{Solution 1 : laisser la base faire le calcul}
+\begin{lstlisting}[language=Java]
+// NON : lecture, calcul en Java, puis ecriture (2 requetes, fenetre de concurrence)
+double solde = lireSolde(c, num);
+majSolde(c, num, solde - montant);
+
+// OUI : une seule requete, atomique pour la ligne concernee
+PreparedStatement ps = c.prepareStatement(
+  "UPDATE Compte SET solde = solde - ? WHERE numCompte = ? AND solde >= ?");
+ps.setBigDecimal(1, montant); ps.setInt(2, num); ps.setBigDecimal(3, montant);
+if (ps.executeUpdate() == 0) throw new SoldeInsuffisantException(num);
+\end{lstlisting}
+  \begin{itemize}
+    \item La 2\textsuperscript{e} transaction attend le verrou de ligne, puis relit la valeur \`a jour : r\'esultat 850
+    \item La condition \texttt{solde >= ?} v\'erifie la r\`egle m\'etier \textbf{dans la m\^eme requ\^ete}
+    \item \`A privil\'egier d\`es que le calcul s'exprime en SQL
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Solution 2 : verrou pessimiste (\texttt{SELECT \ldots{} FOR UPDATE})}
+\begin{lstlisting}[language=Java]
+c.setAutoCommit(false);
+PreparedStatement sel = c.prepareStatement(
+  "SELECT solde FROM Compte WHERE numCompte = ? FOR UPDATE");  // pose un verrou
+sel.setInt(1, num);
+ResultSet rs = sel.executeQuery(); rs.next();
+BigDecimal solde = rs.getBigDecimal("solde");
+// ... regles metier complexes en Java ...
+majSolde(c, num, solde.subtract(montant));
+c.commit();                                                    // libere le verrou
+\end{lstlisting}
+  \begin{itemize}
+    \item Les autres transactions qui veulent la m\^eme ligne \textbf{attendent} le \texttt{COMMIT}
+    \item Utile quand la logique est trop complexe pour une seule requ\^ete
+    \item Transaction \textbf{courte} obligatoire : jamais d'attente utilisateur pendant qu'on tient un verrou
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Solution 3 : verrou optimiste (colonne de version)}
+\begin{lstlisting}[language=SQL]
+ALTER TABLE Compte ADD COLUMN version INT NOT NULL DEFAULT 0;
+-- lecture : on memorise la version lue (ex. 7)
+SELECT solde, version FROM Compte WHERE numCompte = 1;
+-- ecriture : seulement si personne n'a modifie la ligne entre-temps
+UPDATE Compte SET solde = 900, version = version + 1
+ WHERE numCompte = 1 AND version = 7;
+\end{lstlisting}
+  \begin{itemize}
+    \item 0 ligne modifi\'ee $\Rightarrow$ conflit : on pr\'evient l'utilisateur ou on rejoue
+    \item Aucun verrou tenu entre la lecture et l'\'ecriture : adapt\'e aux \textbf{longues interactions} (formulaire web)
+    \item JPA l'automatise avec \texttt{@Version} (\alert{chapitre 6})
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Quelle solution choisir ?}
+  \begin{datacard}
+    \small
+    \begin{tabular}{@{}p{3.6cm}p{4.4cm}p{4.4cm}@{}}
+      \toprule
+      \textbf{Approche} & \textbf{Quand l'utiliser} & \textbf{Prix \`a payer} \\
+      \midrule
+      Calcul en SQL & mise \`a jour simple (compteur, solde) & aucun \\
+      \texttt{FOR UPDATE} & logique complexe, conflits fr\'equents & attente, risque d'interblocage \\
+      Version (optimiste) & conflits rares, interaction longue & g\'erer l'\'echec (message, rejeu) \\
+      \texttt{REPEATABLE READ}/ \texttt{SERIALIZABLE} & r\`egles portant sur plusieurs lignes & rejouer sur SQLState \texttt{40001} \\
+      \bottomrule
+    \end{tabular}
+  \end{datacard}
+\end{frame}
+
+% ================================================================
+\section{Interblocages}
+
+\begin{frame}{Interblocage (\textit{deadlock})}
+  \begin{center}
+  \begin{tikzpicture}
+    \node[tx]  (a1) at (0,0) {UPDATE compte 1};
+    \node[txb] (b1) at (6,-0.6) {UPDATE compte 2};
+    \node[tx]  (a2) at (0,-1.2) {UPDATE compte 2 \ldots{} attend T2};
+    \node[txb] (b2) at (6,-1.8) {UPDATE compte 1 \ldots{} attend T1};
+    \node[font=\small\bfseries, text=qaaccent] at (0,0.6) {T1};
+    \node[font=\small\bfseries, text=qaaccent2] at (6,0.6) {T2};
+    \draw[-Latex, thick, qaaccent2] (b2.west) -- (a1.east);
+    \draw[-Latex, thick, qaaccent] (a2.east) -- (b1.west);
+  \end{tikzpicture}
+  \end{center}
+  \begin{itemize}
+    \item PostgreSQL d\'etecte le cycle (au bout d'une seconde) et \textbf{annule l'une des deux} :
+      \texttt{ERROR: deadlock detected} \hfill SQLState \texttt{40P01}
+    \item Pr\'evention : toujours verrouiller dans le \textbf{m\^eme ordre} (ex. compte de plus petit num\'ero d'abord), transactions courtes
+    \item L'application traite \texttt{40P01} comme \texttt{40001} : on \textbf{rejoue} la transaction
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Rejouer une transaction refus\'ee}
+\begin{lstlisting}[language=Java]
+for (int essai = 1; ; essai++) {
+  try (Connection c = dataSource.getConnection()) {
+    c.setAutoCommit(false);
+    c.setTransactionIsolation(Connection.TRANSACTION_REPEATABLE_READ);
+    try {
+      virer(c, src, dst, montant);
+      c.commit();
+      return;
+    } catch (SQLException e) {
+      c.rollback();
+      boolean rejouable = "40001".equals(e.getSQLState()) || "40P01".equals(e.getSQLState());
+      if (!rejouable || essai == 3) throw e;
+    }
+  }
+}
+\end{lstlisting}
+\end{frame}
+
+\begin{frame}{Bonnes pratiques}
+  \begin{itemize}
+    \item Des transactions \textbf{courtes} : pas d'appel r\'eseau, pas d'attente utilisateur \`a l'int\'erieur
+    \item La fronti\`ere de transaction est dans la \textbf{couche service} (chapitre 5), pas dans chaque DAO
+    \item Pr\'ef\'erer les mises \`a jour \textbf{relatives} en SQL (\texttt{solde = solde - ?})
+    \item Faire v\'erifier les r\`egles par la base : \texttt{CHECK (solde >= 0)}, \texttt{UNIQUE}, cl\'es \'etrang\`eres
+    \item Montants : \texttt{NUMERIC} en SQL, \texttt{BigDecimal} en Java (jamais \texttt{REAL}/\texttt{double})
+    \item Toujours \texttt{rollback()} en cas d'exception, et \texttt{close()} pour rendre la connexion au pool
+  \end{itemize}
+\end{frame}
+
+% ================================================================
+\section{Exigences pour les rendus de TP}
+
+\begin{frame}{Un rendu de qualit\'e, c'est\ldots}
+  \begin{columns}[T]
+    \begin{column}{0.48\textwidth}
+      \begin{block}{D\'ep\^ot Git}
+        \begin{itemize}
+          \item Un d\'ep\^ot par bin\^ome, commits r\'eguliers et messages explicites
+          \item \texttt{.gitignore} : \texttt{target/}, \texttt{.idea/}, \alert{\texttt{.env}}
+          \item Aucun mot de passe dans le code ni dans l'historique
+          \item Projet Maven standard (\texttt{src/main/java}, \texttt{src/test/java})
+        \end{itemize}
+      \end{block}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \begin{block}{README.md}
+        \begin{itemize}
+          \item Comment lancer la base (\texttt{docker compose up -d})
+          \item Comment compiler et ex\'ecuter (\texttt{mvn \ldots})
+          \item Ce qui est fait, ce qui ne l'est pas
+          \item Choix techniques et difficult\'es
+        \end{itemize}
+      \end{block}
+    \end{column}
+  \end{columns}
+  \vspace{2mm}
+  \begin{alertblock}{Test d'acceptation}
+    Un enseignant clone le d\'ep\^ot sur une machine vierge et suit le README : \textbf{\c{c}a doit fonctionner}.
+  \end{alertblock}
+\end{frame}
+
+\rquestionslide
+
+\end{document}

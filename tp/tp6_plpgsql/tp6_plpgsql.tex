@@ -1,0 +1,502 @@
+\documentclass[11pt]{article}
+\input{../../latex/common/r307-tp-preamble.tex}
+\graphicspath{{../../latex/common/assets/}{./}}
+\lstset{language=SQL}
+
+\begin{document}
+\rtpheader{6}{Proc\'edures stock\'ees et triggers}
+\section*{Contexte général}
+
+Lors des TP précédents, l’application bancaire a été développée en faisant évoluer
+progressivement l’accès aux données :
+\begin{itemize}
+    \item accès direct via \textbf{JDBC} ;
+    \item utilisation de \textbf{JPA} et de l’ORM ;
+    \item structuration de l’accès aux données avec le \textbf{patron Repository}.
+\end{itemize}
+
+Dans tous ces cas, la logique métier était principalement implémentée
+\textbf{côté application Java}.
+
+Dans ce dernier TP, une partie de cette logique va être déplacée
+\textbf{côté base de données}, à l’aide des fonctionnalités avancées des serveurs de bases de données (SGBD), dans notre cas PostgreSQL :
+\begin{itemize}
+    \item les \textbf{procédures stockées} ;
+    \item et les \textbf{triggers}.
+\end{itemize}
+
+La base de données PostgreSQL sera exécutée dans un conteneur Docker, afin de garantir un environnement reproductible. Nous allons écrire ces deux fonctionnalités avec le langage PL/pgSQL (\textit{Procedural Language PostgreSQL}). Un mini-tutoriel est donné à la fin du sujet.
+
+\bigskip
+
+%-------------------------------------------------
+\section*{Procédures stockées}
+
+Une procédure stockée est un programme stocké et exécuté directement par le SGBD (dans notre cas, PostgreSQL).
+Elle permet :
+\begin{itemize}
+    \item de regrouper plusieurs instructions SQL dans une seule unité logique ;
+    \item de centraliser certaines règles métier ;
+    \item de réduire les échanges entre l’application et la base de données ;
+    \item d’améliorer la sécurité en contrôlant l’accès aux données.
+\end{itemize}
+
+Dans PostgreSQL, les procédures et fonctions peuvent être écrites en \texttt{PL/pgSQL}
+et invoquées depuis une application Java via JDBC ou JPA.
+
+\bigskip
+
+%-------------------------------------------------
+\section*{Triggers}
+
+Un trigger est un mécanisme permettant d’exécuter automatiquement une action
+lorsqu’un événement se produit sur une table (INSERT, UPDATE, DELETE, ...).
+
+Les triggers sont principalement utilisés pour :
+\begin{itemize}
+    \item garantir des règles d’intégrité complexes ;
+    \item tracer des modifications (journalisation) ;
+    \item maintenir la cohérence des données ;
+    \item appliquer des règles indépendantes de l’application.
+\end{itemize}
+
+Un trigger est associé à une table et repose sur une fonction déclenchée automatiquement.
+
+\bigskip
+
+%-------------------------------------------------
+\section*{Schéma de la base de données}
+
+On reprend les tables de l’application bancaire développée précédemment :
+\begin{itemize}
+    \item \texttt{Client(numClient, nomClient, prenomClient, ...)}
+    \item \texttt{Compte(numCompte, solde, typeCompte)}
+    \item \texttt{Compte\_Client(numClient, numCompte)}
+    \item \texttt{Agent(numAgent, nomAgent, ...)}
+    \item \texttt{Agence(numAgence, telAgence, ...)}
+\end{itemize}
+
+\bigskip
+
+%-------------------------------------------------
+\section*{Exercice 1 -- Procédures stockées}
+
+On souhaite implémenter une opération de virement bancaire entre deux comptes.
+
+\subsection*{Travail demandé}
+\begin{enumerate}[label=\alph*)]
+    \item Créer une procédure stockée \texttt{virement} prenant en paramètres :
+    \begin{itemize}
+        \item l’identifiant du compte source ;
+        \item l’identifiant du compte destination ;
+        \item le montant du virement.
+    \end{itemize}
+
+    \item La procédure devra :
+    \begin{itemize}
+        \item vérifier que le compte source dispose d’un solde suffisant ;
+        \item débiter le compte source ;
+        \item créditer le compte destination ;
+        \item garantir l’atomicité de l’opération.
+    \end{itemize}
+
+    \item Tester la procédure directement dans PostgreSQL.
+
+    \item Expliquer l’intérêt d’implémenter cette logique sous forme de procédure
+    stockée plutôt que côté application Java.
+
+    \item Que se passe-t-il si le compte \textbf{destination} n'existe pas ? Testez avec un numéro inexistant,
+    puis regardez le solde du compte source. Corrigez la procédure (indice : la variable \texttt{FOUND}
+    après un \texttt{UPDATE}).
+
+    \item Appelez la procédure depuis votre application Java :
+\begin{lstlisting}[language=Java]
+try (PreparedStatement ps = c.prepareStatement("CALL virement(?, ?, CAST(? AS REAL))")) {
+    ps.setInt(1, src);
+    ps.setInt(2, dst);
+    ps.setDouble(3, montant);
+    ps.execute();
+} catch (SQLException e) {
+    System.err.println(e.getSQLState() + " : " + e.getMessage());
+}
+\end{lstlisting}
+    Provoquez un solde insuffisant : quel \texttt{SQLState} reçoit Java ? Transformez cette erreur en
+    exception métier \texttt{SoldeInsuffisantException}. Pourquoi le \texttt{CAST} est-il nécessaire
+    (essayez sans) ?
+\end{enumerate}
+La correction est disponible sur Moodle. Pour bien en comprendre les détails, nous vous invitons à lire attentivement le sujet jusqu’à la fin.
+\bigskip
+
+%-------------------------------------------------
+\section*{Exercice 2 -- Triggers}
+
+On souhaite tracer automatiquement les opérations effectuées sur les comptes bancaires.
+
+\subsection*{Travail demandé}
+
+\begin{enumerate}[label=\alph*)]
+    \item Créer une table \texttt{HistoriqueCompte} contenant :
+    \begin{itemize}
+        \item l’identifiant du compte ;
+        \item l’ancienne valeur du solde ;
+        \item la nouvelle valeur du solde ;
+        \item la date de modification.
+    \end{itemize}
+
+    \item Créer une fonction de trigger permettant d’insérer automatiquement
+    une ligne dans \texttt{HistoriqueCompte} lors d’une modification du solde d’un compte.
+
+    \item Associer cette fonction à un trigger déclenché lors d’un \texttt{UPDATE}
+    sur la table \texttt{Compte}.
+
+    \item Tester le trigger à l’aide :
+    \begin{itemize}
+        \item d’une mise à jour SQL directe ;
+        \item de la procédure stockée du premier exercice.
+    \end{itemize}
+
+    \item Expliquer l’intérêt d’un trigger par rapport à une journalisation
+    réalisée côté application.
+\end{enumerate}
+La correction est disponible sur Moodle. Pour bien en comprendre les détails, nous vous invitons à lire attentivement le sujet jusqu’à la fin.
+\bigskip
+
+%-------------------------------------------------
+\section*{Exercice 3 -- Curseurs : relevé de compte}
+
+On souhaite produire le relevé d'un compte : ses opérations dans l'ordre chronologique, avec le
+\textbf{solde cumulé} après chaque opération (un dépôt augmente le cumul, un retrait le diminue).
+
+\subsection*{Travail demandé}
+\begin{enumerate}[label=\alph*)]
+    \item Écrire une fonction \texttt{releve\_compte(p\_num INT)} qui retourne une table
+    \texttt{(date\_op DATE, type\_op VARCHAR, montant\_op REAL, cumul REAL)}. Elle doit parcourir les
+    opérations du compte avec un \textbf{curseur explicite} (\texttt{OPEN}, \texttt{FETCH}, \texttt{CLOSE})
+    et renvoyer chaque ligne avec \texttt{RETURN NEXT}.
+    \item Lever une exception si le compte n'existe pas.
+    \item Tester : \texttt{SELECT * FROM releve\_compte(1);}
+    \item Obtenir le même résultat avec \textbf{une seule requête SQL}, sans curseur, grâce à une fonction de fenêtre :
+    \texttt{sum(\ldots) OVER (ORDER BY dateOperation, numOperation)}. Quelle version préférez-vous, et pourquoi ?
+    \item Depuis Java, afficher le relevé avec un \texttt{PreparedStatement} sur
+    \texttt{SELECT * FROM releve\_compte(?)}.
+\end{enumerate}
+
+\bigskip
+
+\section*{Rendu attendu}
+
+\begin{itemize}
+    \item Les scripts SQL (procédures, triggers, tests) sont donnés sur Moodle. Pas besoin de les rendre ;
+    \item Résultats des tests (captures d'écran) ;
+    \item Réponses argumentées aux questions dans un fichier Markdown.
+\end{itemize}
+
+\section*{Exemples de procédures stockées et triggers}
+
+\subsection*{1. Exemples de procédures stockées (logique métier explicite)}
+
+Les procédures stockées sont idéales pour encapsuler des règles métier critiques, transactionnelles et réutilisables par toutes les applications clientes.
+
+\begin{enumerate}
+
+\item \textbf{Clôture d'un compte bancaire}
+
+\textbf{Procédure :} \texttt{cloturer\_compte(numCompte)}
+
+\begin{itemize}
+    \item Vérifie que le solde est nul.
+    \item Empêche la clôture si le compte est débiteur.
+    \item Supprime ou archive le compte.
+\end{itemize}
+
+\textbf{Pourquoi une procédure ?}
+Règle métier critique, transactionnelle, commune à toutes les applications clientes.
+
+\item \textbf{Ouverture d'un compte}
+
+\textbf{Procédure :} \texttt{ouvrir\_compte(typeCompte, soldeInitial)}
+
+\begin{itemize}
+    \item Crée un nouveau compte.
+    \item Applique des règles selon le type de compte (minimum initial, découvert autorisé).
+    \item Initialise correctement les données.
+\end{itemize}
+
+\textbf{Pourquoi une procédure ?}
+Centralise les règles d’ouverture indépendamment du code Java.
+
+\item \textbf{Changement de type de compte}
+
+\textbf{Procédure :} \texttt{changer\_type\_compte(numCompte, nouveauType)}
+
+\begin{itemize}
+    \item Vérifie la compatibilité du type avec le solde actuel.
+    \item Empêche certains changements (ex : compte épargne → compte courant).
+\end{itemize}
+
+\textbf{Pourquoi une procédure ?}
+Règles complexes dépendantes des données existantes.
+
+\item \textbf{Calcul et versement des intérêts}
+
+\textbf{Procédure :} \texttt{verser\_interets()}
+
+\begin{itemize}
+    \item Parcourt tous les comptes épargne.
+    \item Calcule les intérêts.
+    \item Met à jour les soldes.
+\end{itemize}
+
+\textbf{Pourquoi une procédure ?}
+Traitement batch, exécuté périodiquement côté base (cron, tâche planifiée).
+
+\item \textbf{Virement groupé}
+
+\textbf{Procédure :} \texttt{virement\_multiple(listeComptes, montant)}
+
+\begin{itemize}
+    \item Effectue plusieurs virements dans une seule transaction.
+    \item Annule tout si une seule opération échoue.
+\end{itemize}
+
+\textbf{Pourquoi une procédure ?}
+Garantie d’atomicité sur plusieurs opérations.
+
+\end{enumerate}
+
+\subsection*{2. Exemples de triggers (règles automatiques et transverses)}
+
+Les triggers sont utilisés pour appliquer des règles automatiques, transverses et non contournables.
+
+\begin{enumerate}
+
+\item \textbf{Interdiction de solde négatif}
+
+\textbf{Trigger :} \texttt{before\_update\_solde}
+
+\begin{itemize}
+    \item Vérifie qu’un solde ne devient pas négatif.
+    \item Bloque l’opération automatiquement.
+\end{itemize}
+
+\textbf{Pourquoi un trigger ?}
+Règle d’intégrité qui doit s’appliquer même en cas d’UPDATE SQL direct.
+
+\item \textbf{Journalisation des opérations}
+
+\textbf{Trigger :} \texttt{after\_update\_compte}
+
+\begin{itemize}
+    \item Enregistre toute modification de solde.
+    \item Sert à l’audit et à la traçabilité.
+\end{itemize}
+
+\textbf{Pourquoi un trigger ?}
+Indépendant de l’application, impossible à contourner.
+
+\item \textbf{Détection d’opérations suspectes}
+
+\textbf{Trigger :} \texttt{after\_update\_solde}
+
+\begin{itemize}
+    \item Détecte des montants inhabituels.
+    \item Insère une alerte dans une table dédiée.
+\end{itemize}
+
+\textbf{Pourquoi un trigger ?}
+Surveillance automatique et continue.
+
+\item \textbf{Mise à jour d’un solde global}
+
+\textbf{Trigger :} \texttt{after\_update\_compte}
+
+\begin{itemize}
+    \item Met à jour le solde total d’une agence.
+    \item Maintient des données agrégées cohérentes.
+\end{itemize}
+
+\textbf{Pourquoi un trigger ?}
+Évite des calculs coûteux répétés côté application.
+
+\item \textbf{Historisation des comptes supprimés}
+
+\textbf{Trigger :} \texttt{before\_delete\_compte}
+
+\begin{itemize}
+    \item Archive les informations du compte supprimé.
+    \item Permet une récupération ou un audit ultérieur.
+\end{itemize}
+
+\textbf{Pourquoi un trigger ?}
+Traçabilité forte, aucune suppression silencieuse.
+
+\end{enumerate}
+
+\subsection*{Message clé}
+
+\begin{itemize}
+\item \textbf{Les procédures stockées} sont adaptées aux règles métier explicites et transactionnelles ;
+\item \textbf{Les triggers} sont adaptés aux règles automatiques, transverses et non contournables.
+\end{itemize}
+        
+
+\section*{Mini-tutoriel : bases du PL/pgSQL}
+
+PL/pgSQL (Procedural Language PostgreSQL) est un langage procédural permettant
+d’écrire des programmes exécutés directement par PostgreSQL.
+Il est utilisé pour définir des \textbf{procédures stockées} et des \textbf{triggers}.
+
+Ce tutoriel présente uniquement les éléments nécessaires à la réalisation de ce TP.
+
+\bigskip
+
+\subsection*{Structure générale d’une procédure}
+
+Une procédure stockée PostgreSQL se définit avec l’instruction
+\texttt{CREATE PROCEDURE} et contient un bloc \texttt{BEGIN ... END}.
+
+\begin{verbatim}
+CREATE OR REPLACE PROCEDURE nom_procedure(paramètres)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    -- instructions SQL
+END;
+$$;
+\end{verbatim}
+
+Une procédure peut être appelée avec l’instruction \texttt{CALL}.
+
+\begin{verbatim}
+CALL nom_procedure(...);
+\end{verbatim}
+
+\bigskip
+
+\subsection*{Déclaration de variables}
+
+Les variables sont déclarées dans une section \texttt{DECLARE}.
+
+\begin{verbatim}
+DECLARE
+    solde_source REAL;
+\end{verbatim}
+
+Elles peuvent ensuite être utilisées dans le corps de la procédure.
+
+\bigskip
+
+\subsection*{Récupération d’un résultat dans une variable}
+
+L’instruction \texttt{SELECT ... INTO} permet de stocker le résultat
+d’une requête SQL dans une variable.
+
+\begin{verbatim}
+SELECT solde INTO solde_source
+FROM Compte
+WHERE numCompte = 1001;
+\end{verbatim}
+
+\bigskip
+
+\subsection*{Conditions}
+
+Les structures conditionnelles utilisent \texttt{IF / THEN / END IF}.
+
+\begin{verbatim}
+IF solde_source < 0 THEN
+    RAISE EXCEPTION 'Solde négatif';
+END IF;
+\end{verbatim}
+
+\bigskip
+
+\subsection*{Gestion des erreurs}
+
+L’instruction \texttt{RAISE EXCEPTION} permet d’arrêter l’exécution
+de la procédure et d’afficher un message d’erreur.
+
+\begin{verbatim}
+RAISE EXCEPTION 'Erreur : solde insuffisant';
+\end{verbatim}
+
+\bigskip
+
+\subsection*{Transactions}
+
+Dans PostgreSQL, une procédure stockée s’exécute par défaut
+dans une transaction.  
+Si une exception est levée, toutes les modifications sont annulées.
+
+Cela garantit l’atomicité des opérations sensibles comme un virement bancaire.
+
+\bigskip
+
+\subsection*{Curseurs}
+
+Un curseur parcourt le résultat d'une requête \textbf{ligne par ligne}. On le déclare, on l'ouvre,
+on lit chaque ligne avec \texttt{FETCH}, et on s'arrête quand \texttt{FOUND} devient faux.
+
+\begin{verbatim}
+DECLARE
+    cur CURSOR FOR SELECT numCompte, solde FROM Compte ORDER BY numCompte;
+    ligne RECORD;
+BEGIN
+    OPEN cur;
+    LOOP
+        FETCH cur INTO ligne;
+        EXIT WHEN NOT FOUND;
+        RAISE NOTICE 'Compte % : %', ligne.numCompte, ligne.solde;
+    END LOOP;
+    CLOSE cur;
+END;
+\end{verbatim}
+
+La forme \texttt{FOR ligne IN SELECT \ldots{} LOOP \ldots{} END LOOP;} utilise un curseur implicite.
+Une fonction qui renvoie plusieurs lignes se déclare \texttt{RETURNS TABLE(\ldots)} et renvoie chaque
+ligne avec \texttt{RETURN NEXT}. Attention : un traitement ligne par ligne est souvent plus lent qu'une
+requête SQL ensembliste équivalente.
+
+\bigskip
+
+\subsection*{Fonctions et triggers}
+
+Un trigger repose sur une \textbf{fonction} qui retourne \texttt{TRIGGER}.
+
+\begin{verbatim}
+CREATE OR REPLACE FUNCTION nom_fonction()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    -- traitement automatique
+    RETURN NEW;
+END;
+$$;
+\end{verbatim}
+
+Dans une fonction de trigger :
+\begin{itemize}
+    \item \texttt{OLD} représente l’ancienne ligne dans la table ;
+    \item \texttt{NEW} représente la nouvelle ligne.
+\end{itemize}
+
+\bigskip
+
+\subsection*{Création d’un trigger}
+
+Un trigger est associé à une table et à un événement.
+
+\begin{verbatim}
+CREATE TRIGGER nom_trigger
+AFTER UPDATE
+ON Compte
+FOR EACH ROW
+EXECUTE FUNCTION nom_fonction();
+\end{verbatim}
+
+Le code de la fonction est exécuté automatiquement
+lors de l’événement concerné.
+
+
+\end{document}

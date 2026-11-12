@@ -1,0 +1,302 @@
+\documentclass[11pt]{article}
+\input{../../latex/common/r307-tp-preamble.tex}
+\graphicspath{{../../latex/common/assets/}{./}}
+
+
+\begin{document}
+
+\rtpheader{1}{Acc\`es \`a une base de donn\'ees avec JDBC}
+
+	
+\section{Introduction}
+Dans ce TD/TP, vous allez développer une application Java qui interagit avec une base de données relationnelle en utilisant JDBC. Vous devrez également dockeriser votre application et la base de données.
+
+\section{Prérequis}
+\begin{itemize}
+    \item Connaissances de base en Java.
+    \item Docker installé sur votre machine et une bonne connexion Internet.
+    \item L'IDE IntelliJ IDEA de Jetbrains.
+\end{itemize}
+
+\section{Diagramme de la base de données}
+\begin{center}
+    \includegraphics[width=1\textwidth]{img/db_schema.png}
+\end{center}
+
+\section{Description de la base de données}
+Le schéma de la base de données est le suivant :
+\begin{itemize}
+    \item \textbf{Compte} : numCompte (INT), solde (REAL), typeCompte (VARCHAR).
+    \item \textbf{Client} : numClient (INT), nomClient (VARCHAR), prenomClient (VARCHAR), adClient (VARCHAR), dateNaissClient (DATE), ageClient (INT).
+    \item \textbf{Opération} : numOperation (INT), dateOperation (DATE), typeOperation (VARCHAR), montant (REAL).
+    \item \textbf{Agent} : numAgent (INT), nomAgent (VARCHAR), prenomAgent (VARCHAR), salaire (DECIMAL), estDirecteur (LOGICAL).
+    \item \textbf{Agence} : numAgence (INT), telAgence (VARCHAR), adAgence (VARCHAR).
+\end{itemize}
+
+\section{Mise en place de la base de données avec Docker}
+Vous allez utiliser Docker pour créer une instance PostgreSQL contenant cette base de données.
+
+\subsection{Étape 1 : Créer un docker-compose.yml pour la base de données}
+Créez un fichier \texttt{docker-compose.yml} pour lancer un conteneur PostgreSQL avec la base de données initialisée.
+
+\begin{lstlisting}
+version: '3.8'
+services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: banque_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+\end{lstlisting}
+
+\subsection{Étape 2 : Script SQL d'initialisation}
+Créez un fichier \texttt{init.sql} pour initialiser la base de données avec les tables et quelques données.
+
+\begin{lstlisting}[language=SQL,breaklines=true]
+CREATE TABLE IF NOT EXISTS Agence (
+    numAgence INT PRIMARY KEY,
+    telAgence VARCHAR(50),
+    adAgence VARCHAR(100)
+);
+
+CREATE TABLE IF NOT EXISTS Agent (
+    numAgent INT PRIMARY KEY,
+    nomAgent VARCHAR(50),
+    prenomAgent VARCHAR(50),
+    salaire DECIMAL(10, 2),
+    estDirecteur BOOLEAN,
+    numAgence INT REFERENCES Agence(numAgence)
+);
+
+CREATE TABLE IF NOT EXISTS Client (
+    numClient INT PRIMARY KEY,
+    nomClient VARCHAR(50),
+    prenomClient VARCHAR(50),
+    adClient VARCHAR(100),
+    dateNaissClient DATE,
+    ageClient INT,
+    numAgent INT REFERENCES Agent(numAgent)
+);
+
+CREATE TABLE IF NOT EXISTS Compte (
+    numCompte INT PRIMARY KEY,
+    solde REAL,
+    typeCompte VARCHAR(50)
+);
+
+CREATE TABLE IF NOT EXISTS Operation (
+    numOperation INT PRIMARY KEY,
+    dateOperation DATE,
+    typeOperation VARCHAR(50),
+    montant REAL,
+    numCompte INT REFERENCES Compte(numCompte)
+);
+\end{lstlisting}
+
+\begin{infobox}[Explorer la base avec psql]
+Les commandes pour ouvrir un shell \texttt{psql} dans le conteneur et ex\'ecuter des requ\^etes \`a la main
+sont dans les \textbf{annexes du chapitre 1} (\`a lire en autonomie). V\'erifiez que les tables et les donn\'ees
+de \texttt{init.sql} sont bien pr\'esentes avant d'\'ecrire du Java.
+\end{infobox}
+
+\section{Tâches à réaliser}
+Vous devez implémenter les méthodes Java suivantes en utilisant JDBC pour interagir avec la base de données. Lancez IntelliJ IDEA sur votre PC et créez un projet Java avec Maven comme système de build.
+
+\subsection{Méthodes à implémenter}
+Voici quelques méthodes que vous devez implémenter dans une classe \texttt{BanqueDAO} :
+
+\begin{lstlisting}[language=Java]
+import java.sql.*;
+import java.util.ArrayList;
+import java.util.List;
+
+public class BanqueDAO {
+ private Connection connection;
+
+ public BanqueDAO(Connection connection) {
+  this.connection = connection;
+ }
+
+ // Methode pour se connecter au serveur de donnees
+ public static Connection getConnection() throws SQLException {
+  // TO COMPLETE
+ }
+
+ 
+ 
+ // Methode pour ajouter un client
+ public void ajouterClient(Client client) throws SQLException {
+  // TO COMPLETE
+ }
+
+ // Methode pour obtenir un client par son numero
+ public Client obtenirClientParNum(int numClient) throws SQLException {
+  // TO COMPLETE        
+ }
+
+ // Methode pour ajouter une operation a un compte
+ public void ajouterOperation(Operation operation) throws SQLException {
+  // TO COMPLETE
+ }
+
+ // Methode pour obtenir le solde d'un compte
+ public double obtenirSoldeCompte(int numCompte) throws SQLException {
+  // TO COMPLETE
+ }
+
+ // Methode pour obtenir toutes les operations d'un compte
+ public List<Operation> obtenirOperationsParCompte(int numCompte) throws SQLException {
+  // TO COMPLETE
+ }
+
+}
+\end{lstlisting}
+
+\begin{infobox}[Pour aller plus loin (facultatif)]
+Si vous avez termin\'e : \texttt{ajouterAgence(Agence)}, \texttt{ajouterAgent(Agent)} et
+\texttt{obtenirClientsParAgent(int numAgent)}. Ces m\'ethodes ne sont pas \'evalu\'ees.
+\end{infobox}
+
+\subsection{Classes métier}
+Voici les classes métiers que vous devez utiliser :
+
+\begin{lstlisting}[language=Java]
+public class Client {
+    private int numClient;
+    private String nomClient;
+    private String prenomClient;
+    private String adClient;
+    private java.sql.Date dateNaissClient;
+    private int ageClient;
+    private int numAgent;
+
+    public Client(int numClient, String nomClient, String prenomClient, String adClient, java.sql.Date dateNaissClient, int numAgent) {
+        this.numClient = numClient;
+        this.nomClient = nomClient;
+        this.prenomClient = prenomClient;
+        this.adClient = adClient;
+        this.dateNaissClient = dateNaissClient;
+        // this.agentClient = ...
+        this.numAgent = numAgent;
+    }
+
+    // Getters et setters. A completer
+}
+
+public class Compte {
+    private int numCompte;
+    private double solde;
+    private String typeCompte;
+
+    public Compte(int numCompte, double solde, String typeCompte) {
+        this.numCompte = numCompte;
+        this.solde = solde;
+        this.typeCompte = typeCompte;
+    }
+
+    // Getters et setters. A completer
+}
+
+public class Operation {
+    private int numOperation;
+    private java.sql.Date dateOperation;
+    private String typeOperation;
+    private double montant;
+    private int numCompte;
+
+    public Operation(int numOperation, java.sql.Date dateOperation, String typeOperation, double montant) {
+        this.numOperation = numOperation;
+        this.dateOperation = dateOperation;
+        this.typeOperation = typeOperation;
+        this.montant = montant;
+    }
+
+    // Getters et setters. A completer
+}
+
+public class Agent {
+    private int numAgent;
+    private String nomAgent;
+    private String prenomAgent;
+    private double salaire;
+    private boolean estDirecteur;
+
+    // Constructeurs, getters et setters
+}
+
+public class Agence {
+    private int numAgence;
+    private String telAgence;
+    private String adAgence;
+
+    // Constructeurs, getters et setters
+}
+\end{lstlisting}
+
+\section{Bonus (facultatif) : dockerisation de l'application}
+Cette partie n'est pas exig\'ee. Elle est utile si vous voulez livrer une application qui d\'emarre
+avec un seul \texttt{docker compose up}. Les explications sont dans les annexes du chapitre 1.
+
+\subsection{Étape 1 : Créer un Dockerfile pour l'application Java}
+Créez un fichier \texttt{Dockerfile} pour votre application Java.
+
+\begin{lstlisting}
+# Utilisation d'une image Maven pour construire l'application
+FROM maven:3.9.6-eclipse-temurin-17 AS build
+WORKDIR /app
+COPY pom.xml .
+RUN mvn dependency:go-offline
+COPY src ./src
+RUN mvn package
+
+# Utilisation d'une image JRE pour executer l'application
+FROM eclipse-temurin:17-jre-jammy
+WORKDIR /app
+COPY --from=build /app/target/jdbc.example-1.0.0.jar app.jar
+CMD ["java", "-jar", "app.jar"]
+\end{lstlisting}
+
+\subsection{Étape 2 : Mettre à jour le docker-compose.yml}
+Ajoutez un service pour votre application dans le fichier \texttt{docker-compose.yml}.
+
+\begin{lstlisting}
+services:
+  app:
+    build: .
+    depends_on:
+      - db
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/banque_db
+      DB_USER: user
+      DB_PASSWORD: password
+\end{lstlisting}
+
+Mettez à jour le \texttt{docker-compose.yml} pour ne pas exposer le port du serveur Postgres et créez un réseau virtuel Docker entre les deux services pour qu'ils puissent interagir.
+
+\section{Livrables}
+\begin{itemize}
+    \item Un dépôt Git contenant votre code source.
+    \item Une archive Zip avec les sources et fichiers de configuration :
+    \begin{itemize}
+		    \item Le fichier \texttt{docker-compose.yml} de la base (et le \texttt{Dockerfile} si vous avez fait le bonus).
+		    \item Un fichier \texttt{init.sql} pour initialiser la base de données.    
+    \end{itemize}
+
+    \item Un rapport (fichier Markdown) expliquant les choix techniques et les difficultés rencontrées.
+
+\end{itemize}
+
+\section{Conseils}
+\begin{itemize}
+    \item Utilisez des requêtes préparées pour éviter les injections SQL.
+    \item Gérez correctement les exceptions SQL.
+    \item Testez chaque méthode individuellement avant de passer à la suivante.
+\end{itemize}
+
+
+\end{document}

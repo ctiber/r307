@@ -1,0 +1,169 @@
+\documentclass[11pt]{article}
+\input{../../latex/common/r307-tp-preamble.tex}
+\graphicspath{{../../latex/common/assets/}{./}}
+\lstset{language=SQL}
+
+\begin{document}
+\rtpheader{3}{Index et optimisation de requ\^etes}
+
+\section{Objectifs et organisation}
+
+Ce TP met en pratique le chapitre 3. Il dure environ \textbf{une heure} (apr\`es 30 minutes de cours).
+Vous allez :
+\begin{itemize}
+  \item lire des plans d'ex\'ecution avec \texttt{EXPLAIN ANALYZE} ;
+  \item cr\'eer des index et \textbf{mesurer} leur effet, en lecture comme en \'ecriture ;
+  \item comprendre pourquoi un index n'est parfois pas utilis\'e ;
+  \item optimiser des insertions depuis Java avec les lots (\textit{batch}).
+\end{itemize}
+
+\begin{infobox}[Ce qu'on attend]
+Pour chaque exercice, notez dans un fichier \texttt{OPTIMISATION.md} de votre d\'ep\^ot :
+la requ\^ete, le type de parcours lu dans le plan (\textit{Seq Scan}, \textit{Index Scan}\ldots) et le temps
+d'ex\'ecution \textbf{avant} et \textbf{apr\`es} votre modification. Les temps varient d'une machine \`a l'autre :
+c'est l'\textbf{ordre de grandeur} qui compte.
+\end{infobox}
+
+\section{Mise en place}
+
+Le script \texttt{code/generer\_donnees.sql} (fourni sur Moodle) cr\'ee un sch\'ema s\'epar\'e \texttt{perf} avec
+100\,000 clients, 200\,000 comptes et 1\,000\,000 d'op\'erations. Il ne touche pas \`a vos tables des TP pr\'ec\'edents.
+\textbf{Seules les cl\'es primaires sont index\'ees.}
+
+\begin{codebox}
+docker cp generer_donnees.sql <conteneur>:/tmp/
+docker exec -it <conteneur> psql -U user -d banque_db -f /tmp/generer_donnees.sql
+docker exec -it <conteneur> psql -U user -d banque_db
+\end{codebox}
+
+Dans \texttt{psql}, placez-vous dans le sch\'ema et affichez le temps des requ\^etes :
+\begin{lstlisting}
+SET search_path TO perf;
+\timing on
+\d Operation
+\end{lstlisting}
+
+\section{Lire un plan d'ex\'ecution}
+
+\begin{exobox}{Premiers plans}
+\begin{enumerate}[label=\alph*)]
+  \item Ex\'ecutez \texttt{EXPLAIN ANALYZE} sur les deux requ\^etes suivantes :
+\begin{lstlisting}
+SELECT * FROM Operation WHERE numCompte = 4242;
+
+SELECT c.numClient, sum(o.montant)
+  FROM Compte c JOIN Operation o ON o.numCompte = c.numCompte
+ WHERE c.numClient = 4242
+ GROUP BY c.numClient;
+\end{lstlisting}
+  \item Pour chacune : quel type de parcours est utilis\'e sur \texttt{Operation} ? Combien de lignes sont lues
+        puis rejet\'ees (\texttt{Rows Removed by Filter}) ? Combien sont finalement retourn\'ees ?
+  \item Comparez \texttt{EXPLAIN} et \texttt{EXPLAIN ANALYZE} sur la premi\`ere requ\^ete. Quelle est la diff\'erence ?
+\end{enumerate}
+\end{exobox}
+
+\section{Indexer les cl\'es \'etrang\`eres}
+
+\begin{exobox}{Index sur les cl\'es \'etrang\`eres}
+\begin{enumerate}[label=\alph*)]
+  \item Les colonnes \texttt{Operation.numCompte} et \texttt{Compte.numClient} sont des cl\'es \'etrang\`eres.
+        Sont-elles index\'ees ? (\texttt{\textbackslash di} ou \texttt{SELECT * FROM pg\_indexes WHERE schemaname = 'perf';})
+  \item Mesurez la suppression de 50 comptes, \textbf{dans une transaction annul\'ee} pour ne rien perdre :
+\begin{lstlisting}
+BEGIN;
+DELETE FROM Operation WHERE numCompte BETWEEN 1 AND 50;
+EXPLAIN ANALYZE DELETE FROM Compte WHERE numCompte BETWEEN 1 AND 50;
+ROLLBACK;
+\end{lstlisting}
+        Pourquoi est-ce si long alors qu'on ne supprime que 50 lignes ? (Indice : que doit v\'erifier la base
+        pour chaque compte supprim\'e ?)
+  \item Cr\'eez les deux index :
+\begin{lstlisting}
+CREATE INDEX idx_operation_compte ON Operation(numCompte);
+CREATE INDEX idx_compte_client    ON Compte(numClient);
+\end{lstlisting}
+        puis refaites les mesures des questions pr\'ec\'edentes. Quels types de parcours apparaissent maintenant ?
+        Quel est le facteur de gain ?
+\end{enumerate}
+\end{exobox}
+
+\section{Quand l'index n'est pas utilis\'e}
+
+\begin{exobox}{Fonctions, \texttt{LIKE} et index composites}
+\begin{enumerate}[label=\alph*)]
+  \item Cr\'eez \texttt{CREATE INDEX idx\_client\_nom ON Client(nomClient);} puis analysez :
+\begin{lstlisting}
+SELECT * FROM Client WHERE nomClient = 'Nom4242';
+SELECT * FROM Client WHERE lower(nomClient) = 'nom4242';
+SELECT * FROM Client WHERE nomClient LIKE 'Nom424%';
+\end{lstlisting}
+        Lesquelles utilisent l'index ? Proposez et cr\'eez un index pour chacune des deux autres
+        (voir le chapitre 3), puis v\'erifiez.
+  \item Cr\'eez \texttt{CREATE INDEX idx\_op\_compte\_date ON Operation(numCompte, dateOperation);}.
+        Pour chacune des requ\^etes suivantes, pr\'edisez d'abord si l'index sera utilis\'e, puis v\'erifiez :
+\begin{lstlisting}
+SELECT * FROM Operation WHERE numCompte = 42 AND dateOperation >= '2024-01-01';
+SELECT * FROM Operation WHERE dateOperation = '2022-06-01';
+\end{lstlisting}
+  \item Cr\'eez un index sur \texttt{typeOperation} et analysez \texttt{SELECT * FROM Operation WHERE typeOperation = 'DEPOT';}.
+        Quelle proportion des lignes est retourn\'ee ? Le gain est-il comparable \`a celui de l'exercice 2 ? Pourquoi ?
+\end{enumerate}
+\end{exobox}
+
+\begin{exobox}{Le co\^ut des index}
+\begin{enumerate}[label=\alph*)]
+  \item Cr\'eez une copie vide de la table, sans index : \texttt{CREATE TABLE op\_copie (LIKE Operation);}
+  \item Mesurez (\texttt{\textbackslash timing}) : \texttt{INSERT INTO op\_copie SELECT * FROM Operation LIMIT 300000;}
+  \item Videz la table (\texttt{TRUNCATE op\_copie;}), cr\'eez-y 4 index (sur \texttt{numCompte}, \texttt{typeOperation},
+        \texttt{dateOperation} et \texttt{(numCompte, dateOperation)}) et refaites la m\^eme insertion.
+  \item Concluez : faut-il indexer \og toutes les colonnes, au cas o\`u \fg{} ?
+\end{enumerate}
+\end{exobox}
+
+\section{Optimiser c\^ot\'e Java : les lots}
+
+Dans votre projet du TP2, ajoutez une classe \texttt{BenchInsertions} qui ins\`ere \textbf{10\,000 op\'erations}
+dans \texttt{perf.Operation} (num\'eros \`a partir de 2\,000\,001, \texttt{numCompte} entre 1 et 200\,000) et affiche la
+dur\'ee de chaque variante mesur\'ee avec \texttt{System.nanoTime()}. Supprimez les lignes ins\'er\'ees entre deux variantes
+(\texttt{DELETE FROM perf.Operation WHERE numOperation > 2000000}).
+
+\begin{exobox}{Une ligne \`a la fois ou par lots ?}
+\begin{enumerate}[label=\alph*)]
+  \item \textbf{Variante 1} : un \texttt{PreparedStatement}, \texttt{executeUpdate()} pour chaque ligne, en
+        \texttt{autoCommit = true}.
+  \item \textbf{Variante 2} : m\^eme chose, mais dans \textbf{une seule transaction} (\texttt{setAutoCommit(false)} puis \texttt{commit()}).
+  \item \textbf{Variante 3} : une seule transaction et \texttt{addBatch()} / \texttt{executeBatch()} par paquets de 1000.
+  \item \textbf{Variante 4} : variante 3 en ajoutant \texttt{?reWriteBatchedInserts=true} \`a l'URL JDBC.
+  \item Pr\'esentez les quatre dur\'ees dans un tableau et expliquez les \'ecarts (allers-retours r\'eseau,
+        \'ecritures disque au \texttt{COMMIT}).
+\end{enumerate}
+\end{exobox}
+
+\begin{lstlisting}[language=Java]
+String url = "jdbc:postgresql://localhost:5432/banque_db";   // variante 4 : + "?reWriteBatchedInserts=true"
+String sql = "INSERT INTO perf.Operation VALUES (?, ?, ?, ?, ?)";
+long debut = System.nanoTime();
+// ... insertions ...
+System.out.printf("Variante %d : %d ms%n", v, (System.nanoTime() - debut) / 1_000_000);
+\end{lstlisting}
+
+\section{Pour aller plus loin (facultatif) : pagination}
+
+\begin{exobox}{\texttt{OFFSET} ou pagination par cl\'e}
+Comparez les plans et les temps de :
+\begin{lstlisting}
+SELECT * FROM Operation ORDER BY numOperation LIMIT 20 OFFSET 900000;
+SELECT * FROM Operation WHERE numOperation > 900000 ORDER BY numOperation LIMIT 20;
+\end{lstlisting}
+Ajoutez \`a \texttt{BanqueDAO} une m\'ethode \texttt{List<Operation> pageOperations(int apresNum, int taille)} qui utilise la seconde forme.
+\end{exobox}
+
+\section{Rendu}
+\begin{itemize}
+  \item Le fichier \texttt{OPTIMISATION.md} avec vos mesures et vos explications.
+  \item Un script \texttt{index.sql} contenant les index que vous recommandez pour l'application bancaire, chacun justifi\'e par
+        une requ\^ete de l'application (en commentaire).
+  \item La classe \texttt{BenchInsertions}.
+\end{itemize}
+
+\end{document}

@@ -1,0 +1,515 @@
+\documentclass[aspectratio=169,10pt]{beamer}
+\input{../../latex/common/r307-slides-preamble.tex}
+\graphicspath{{../../latex/common/assets/}}
+
+\title{Programmer dans la base : proc\'edures, exceptions, curseurs, triggers}
+\author[C. Tibermacine]{Selena Lamari et Chouki Tibermacine}
+\date{}
+
+% Sortie de psql
+\lstdefinestyle{out}{language={}, basicstyle=\lstcode\scriptsize, backgroundcolor=\color{qapanel}}
+
+\begin{document}
+
+\rtitleslide{7}{Programmer dans la base : proc\'edures, exceptions, curseurs, triggers}
+
+\begin{frame}{Avant de commencer}
+  \begin{alertblock}{La syntaxe de base est dans le TP6}
+    Le \textbf{mini-tutoriel PL/pgSQL} du sujet de TP6 pr\'esente la syntaxe : structure d'une proc\'edure,
+    \texttt{DECLARE}, \texttt{SELECT \ldots{} INTO}, \texttt{IF}, \texttt{RAISE EXCEPTION}, curseur simple,
+    fonction de trigger, \texttt{OLD}/\texttt{NEW}, \texttt{CREATE TRIGGER}. Le sujet liste aussi des
+    exemples de proc\'edures et de triggers pour l'application bancaire.
+  \end{alertblock}
+  \vspace{2mm}
+  Ce chapitre ne la r\'ep\`ete pas. Il r\'epond aux questions que le tutoriel laisse ouvertes :
+  \begin{itemize}
+    \item \textbf{faut-il} mettre cette logique dans la base ?
+    \item fonction ou proc\'edure ? peut-on valider (\texttt{COMMIT}) dans une proc\'edure ?
+    \item comment \textbf{rattraper} une erreur en PL/pgSQL, et comment Java la re\c{c}oit-il ?
+    \item quand un curseur est-il utile, c\^ot\'e base et c\^ot\'e JDBC ?
+    \item quels triggers au-del\`a du \texttt{FOR EACH ROW} simple, et quels pi\`eges ?
+    \item comment s\'ecuriser et versionner ce code ?
+  \end{itemize}
+\end{frame}
+
+% ================================================================
+\section{O\`u placer la logique ?}
+
+\begin{frame}{Java ou base de donn\'ees : les crit\`eres}
+  \begin{datacard}
+    \small
+    \begin{tabular}{@{}p{3.6cm}p{4.3cm}p{4.3cm}@{}}
+      \toprule
+      \textbf{Crit\`ere} & \textbf{Plut\^ot dans la base} & \textbf{Plut\^ot en Java} \\
+      \midrule
+      Clients de la base & plusieurs applications, scripts, acc\`es SQL direct & une seule application \\
+      Volume trait\'e & beaucoup de lignes, peu de r\'esultat & peu de lignes \\
+      Allers-retours & nombreux (boucle de requ\^etes) & un ou deux \\
+      Tests, d\'ebogage & --- & outils Java (JUnit, IDE) \\
+      Mont\'ee en charge & --- & on ajoute des serveurs d'application ; la base est plus dure \`a multiplier \\
+      Portabilit\'e & --- & PL/pgSQL n'existe que sur PostgreSQL \\
+      \bottomrule
+    \end{tabular}
+  \end{datacard}
+  \vspace{1mm}
+  {\small\color{qamuted} Le sujet du TP6 liste les avantages des proc\'edures et triggers ; ce tableau rappelle qu'ils ont aussi un prix.}
+\end{frame}
+
+\begin{frame}[fragile]{La r\`egle de l'outil le plus simple}
+  \begin{enumerate}
+    \item \textbf{Contrainte d\'eclarative} d'abord : \texttt{NOT NULL}, \texttt{CHECK}, \texttt{UNIQUE}, cl\'e \'etrang\`ere
+    \item \textbf{Trigger} si la r\`egle d\'epend d'autres lignes ou d'autres tables, ou s'il faut une action automatique (audit)
+    \item \textbf{Proc\'edure} pour une op\'eration m\'etier compl\`ete et nomm\'ee (virement, cl\^oture)
+  \end{enumerate}
+  \vspace{2mm}
+  \begin{exampleblock}{Exemple : \og interdire un solde n\'egatif \fg{} (liste d'exemples du TP6)}
+    Un trigger fonctionne, mais une contrainte suffit, est plus rapide et ne peut pas \^etre oubli\'ee :
+\begin{lstlisting}[language=SQL]
+ALTER TABLE Compte ADD CONSTRAINT chk_solde CHECK (solde >= 0);
+\end{lstlisting}
+    Sa violation renvoie un code pr\'ecis (\texttt{23514}) et le nom de la contrainte \`a Java.
+  \end{exampleblock}
+\end{frame}
+
+% ================================================================
+\section{Fonctions et proc\'edures}
+
+\begin{frame}{Fonction ou proc\'edure ?}
+  \begin{datacard}
+    \small
+    \begin{tabular}{@{}p{3.3cm}p{4.6cm}p{4.6cm}@{}}
+      \toprule
+       & \textbf{\texttt{FUNCTION}} & \textbf{\texttt{PROCEDURE}} (PostgreSQL 11+) \\
+      \midrule
+      Appel & dans une requ\^ete : \texttt{SELECT f(\ldots)}, \texttt{FROM f(\ldots)}, \texttt{WHERE} & \texttt{CALL p(\ldots)} uniquement \\
+      R\'esultat & une valeur, une ligne ou une table (\texttt{RETURNS TABLE}, \texttt{SETOF}) & aucun, ou param\`etres \texttt{OUT}/\texttt{INOUT} \\
+      \texttt{COMMIT}/\texttt{ROLLBACK} internes & \alert{interdits} & autoris\'es (sous conditions) \\
+      Usage typique & calcul, requ\^ete param\'etr\'ee, fonction de trigger & op\'eration m\'etier, traitement par lots \\
+      \bottomrule
+    \end{tabular}
+  \end{datacard}
+  \vspace{2mm}
+  \begin{itemize}
+    \item Le relev\'e de compte du TP6 est une \textbf{fonction} (on l'interroge avec \texttt{SELECT}) ; le virement est une \textbf{proc\'edure}
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Valider par lots dans une proc\'edure}
+  \begin{columns}[T]
+    \begin{column}{0.55\textwidth}
+\begin{lstlisting}[language=SQL,basicstyle=\lstcode\scriptsize]
+CREATE PROCEDURE verser_interets(
+    p_taux NUMERIC, p_lot INT DEFAULT 1000)
+LANGUAGE plpgsql AS $$
+DECLARE c RECORD; n INT := 0;
+BEGIN
+  FOR c IN SELECT numCompte FROM Compte
+            WHERE typeCompte = 'EPARGNE' LOOP
+    UPDATE Compte
+       SET solde = round(solde * (1 + p_taux), 2)
+     WHERE numCompte = c.numCompte;
+    n := n + 1;
+    IF n % p_lot = 0 THEN
+      COMMIT;                   -- lot valide
+    END IF;
+  END LOOP;
+END $$;
+\end{lstlisting}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \begin{itemize}
+        \item Traitement \textit{batch} (le PN cite les \og batch et proc\'edures stock\'ees \fg{})
+        \item Un incident en cours de route ne fait perdre que le lot courant
+        \item Les verrous sont rel\^ach\'es \`a chaque \texttt{COMMIT}
+      \end{itemize}
+      \vspace{1mm}
+      \textbf{Interdit} (test\'e) :
+      \begin{itemize}
+        \item \texttt{COMMIT} dans une fonction
+        \item \texttt{CALL} dans un \texttt{BEGIN} explicite
+      \end{itemize}
+\begin{lstlisting}[style=out]
+ERROR: invalid transaction termination
+\end{lstlisting}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}[fragile]{Cons\'equence c\^ot\'e Java}
+  \begin{itemize}
+    \item En \texttt{autoCommit = false}, le pilote JDBC ouvre lui-m\^eme une transaction avant chaque requ\^ete
+    \item Une proc\'edure qui fait \texttt{COMMIT} doit donc \^etre appel\'ee en \textbf{autocommit}
+  \end{itemize}
+\begin{lstlisting}[language=Java]
+c.setAutoCommit(true);
+try (Statement s = c.createStatement()) {
+  s.execute("CALL verser_interets(0.02)");                // OK
+}
+c.setAutoCommit(false);
+try (Statement s = c.createStatement()) {
+  s.execute("CALL verser_interets(0.02)");                // SQLState 2D000
+}                                                         // invalid transaction termination
+\end{lstlisting}
+  \begin{itemize}
+    \item Une proc\'edure \textbf{sans} \texttt{COMMIT} interne (le virement) s'appelle normalement dans la transaction de l'application
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Volatilit\'e d'une fonction}
+  \begin{itemize}
+    \item \texttt{VOLATILE} (d\'efaut) : r\'esultat impr\'evisible, r\'e\'evalu\'ee \`a chaque ligne (\texttt{random()}, \texttt{now()} entre deux transactions, tout ce qui \'ecrit)
+    \item \texttt{STABLE} : m\^eme r\'esultat pendant une requ\^ete, peut lire la base
+    \item \texttt{IMMUTABLE} : ne d\'epend que de ses arguments
+  \end{itemize}
+  Lien avec le chapitre 3 : un \textbf{index sur expression} exige une fonction \texttt{IMMUTABLE}
+\begin{lstlisting}[language=SQL]
+CREATE FUNCTION categorie(s NUMERIC) RETURNS TEXT LANGUAGE plpgsql
+  AS $$ BEGIN RETURN CASE WHEN s > 1000 THEN 'haut' ELSE 'bas' END; END $$;
+CREATE INDEX ON Compte (categorie(solde));
+\end{lstlisting}
+\begin{lstlisting}[style=out]
+ERROR:  functions in index expression must be marked IMMUTABLE
+\end{lstlisting}
+  {\small D\'eclarer la bonne volatilit\'e aide aussi l'optimiseur. Mentir (\texttt{IMMUTABLE} sur une fonction qui lit une table) donne des index faux.}
+\end{frame}
+
+\begin{frame}[fragile]{Appeler fonctions et proc\'edures depuis Java}
+\begin{lstlisting}[language=Java]
+// Fonction qui renvoie une table : une requete comme une autre
+PreparedStatement ps = c.prepareStatement("SELECT * FROM releve_compte(?)");
+
+// Procedure : CALL, en convertissant les types si besoin
+PreparedStatement ps = c.prepareStatement("CALL virement(?, ?, CAST(? AS REAL))");
+\end{lstlisting}
+  \begin{itemize}
+    \item PostgreSQL choisit la proc\'edure d'apr\`es les \textbf{types} des arguments ; \texttt{setDouble} envoie un
+      \texttt{double precision} : sans \texttt{CAST}, \texttt{procedure virement(integer, integer, double precision) does not exist}
+    \item Avec Spring Data : \texttt{@Query(value = "CALL \ldots", nativeQuery = true)} (chapitre 6)
+    \item \texttt{@Procedure} (Spring Data) passe les param\`etres \textbf{par nom} : ils doivent porter le m\^eme nom
+      en Java et en SQL, sinon l'appel \'echoue (test\'e)
+  \end{itemize}
+\end{frame}
+
+% ================================================================
+\section{Exceptions}
+
+\begin{frame}[fragile]{Lever une erreur exploitable}
+\begin{lstlisting}[language=SQL]
+RAISE EXCEPTION 'Solde insuffisant sur le compte %', p_num
+  USING ERRCODE = 'P0002',
+        DETAIL  = format('solde = %s, demande = %s', v_solde, p_montant),
+        HINT    = 'Reduire le montant';
+\end{lstlisting}
+\begin{lstlisting}[style=out]
+ERROR:  Solde insuffisant sur le compte 3
+DETAIL:  solde = 10, demande = 50
+HINT:  Reduire le montant
+\end{lstlisting}
+  \begin{itemize}
+    \item Niveaux : \texttt{DEBUG}, \texttt{LOG}, \texttt{INFO}, \texttt{NOTICE}, \texttt{WARNING} (simple message) ; \texttt{EXCEPTION} (arr\^ete et annule)
+    \item \texttt{ERRCODE} : un code par erreur m\'etier, pour que Java les distingue sans analyser le texte.
+      Par d\'efaut : \texttt{P0001}
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Rattraper une erreur : le bloc \texttt{EXCEPTION}}
+  \begin{columns}[T]
+    \begin{column}{0.55\textwidth}
+\begin{lstlisting}[language=SQL,basicstyle=\lstcode\scriptsize]
+BEGIN
+  INSERT INTO journal(msg) VALUES ('avant');
+  BEGIN                                   -- sous-bloc
+    INSERT INTO journal(msg) VALUES ('dans le bloc');
+    UPDATE Compte SET solde = -5 WHERE numCompte = 1;
+  EXCEPTION
+    WHEN check_violation THEN
+      INSERT INTO journal(msg)
+      VALUES ('rattrape : ' || SQLSTATE);
+  END;
+END;
+\end{lstlisting}
+\begin{lstlisting}[style=out]
+ avant
+ rattrape : 23514
+\end{lstlisting}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \begin{itemize}
+        \item Conditions : nom (\texttt{unique\_violation}, \texttt{check\_violation}\ldots), \texttt{SQLSTATE '23505'}, ou \texttt{OTHERS}
+        \item \alert{Tout ce que le sous-bloc a fait est annul\'e} : la ligne \og dans le bloc \fg{} a disparu
+        \item Le bloc pose un point de sauvegarde : il co\^ute cher, \`a \'eviter dans une boucle sur des milliers de lignes
+        \item Ne pas tout avaler avec \texttt{OTHERS} : journaliser puis relancer (\texttt{RAISE;})
+      \end{itemize}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}[fragile]{Inspecter l'erreur rattrap\'ee}
+\begin{lstlisting}[language=SQL]
+EXCEPTION WHEN OTHERS THEN
+  GET STACKED DIAGNOSTICS v_etat       = RETURNED_SQLSTATE,
+                          v_msg        = MESSAGE_TEXT,
+                          v_contrainte = CONSTRAINT_NAME;
+  RAISE NOTICE 'etat=% contrainte=% msg=%', v_etat, v_contrainte, v_msg;
+  RAISE;                                       -- relance la meme erreur
+\end{lstlisting}
+\begin{lstlisting}[style=out]
+NOTICE:  etat=23505 contrainte=compte_pkey msg=duplicate key value violates unique constraint "compte_pkey"
+\end{lstlisting}
+  \begin{itemize}
+    \item Utile pour journaliser dans une table d'erreurs avant de relancer
+    \item Autres champs : \texttt{PG\_EXCEPTION\_DETAIL}, \texttt{PG\_EXCEPTION\_HINT}, \texttt{TABLE\_NAME}, \texttt{COLUMN\_NAME}\ldots
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{L'erreur vue de Java}
+\begin{lstlisting}[language=Java]
+} catch (PSQLException e) {                       // org.postgresql.util
+  ServerErrorMessage m = e.getServerErrorMessage();
+  switch (e.getSQLState()) {
+    case "P0002" -> throw new SoldeInsuffisantException(m.getDetail());
+    case "23505" -> throw new DoublonException(m.getConstraint());
+    case "23514" -> throw new RegleMetierException(m.getConstraint());
+    default      -> throw new DataAccessException(e);
+  }
+}
+\end{lstlisting}
+  \begin{datacard}
+    \scriptsize
+    \begin{tabular}{@{}llll@{}}
+      \toprule
+      \texttt{23505} unicit\'e & \texttt{23503} cl\'e \'etrang\`ere & \texttt{23514} \texttt{CHECK} & \texttt{23502} \texttt{NOT NULL} \\
+      \texttt{40001} s\'erialisation (ch.\,2) & \texttt{40P01} interblocage (ch.\,2) & \texttt{P0001} \texttt{RAISE} par d\'efaut & \texttt{P0002}\ldots{} vos codes \\
+      \bottomrule
+    \end{tabular}
+  \end{datacard}
+  {\small Test\'e : \texttt{getDetail()} renvoie le \texttt{DETAIL} du \texttt{RAISE} (\og solde = 10 \fg), \texttt{getConstraint()} le nom de la contrainte viol\'ee (\og chk\_solde \fg).}
+\end{frame}
+
+% ================================================================
+\section{Curseurs}
+
+\begin{frame}{Curseurs c\^ot\'e base : quand ?}
+  \begin{itemize}
+    \item Un curseur traite le r\'esultat \textbf{ligne par ligne} sans le charger en entier
+    \item \texttt{FOR ligne IN SELECT \ldots{} LOOP} ouvre un curseur implicite : c'est la forme \`a privil\'egier
+    \item Curseur explicite (\texttt{OPEN}/\texttt{FETCH}/\texttt{CLOSE}, vu dans le tutoriel) quand on veut contr\^oler le parcours :
+      plusieurs curseurs en parall\`ele, arr\^et anticip\'e, curseur param\'etr\'e (\texttt{CURSOR (p INT) FOR \ldots})
+  \end{itemize}
+  \begin{block}{Mais d'abord : peut-on l'\'ecrire en une requ\^ete ?}
+    \begin{itemize}
+      \item Exercice 3 du TP6 : le relev\'e avec curseur et la version \texttt{sum(\ldots) OVER (\ldots)} donnent le m\^eme r\'esultat
+      \item Une requ\^ete ensembliste laisse l'optimiseur choisir (index, parall\'elisme) ; une boucle impose l'ordre et le d\'etail
+      \item Curseur justifi\'e : d\'ecision diff\'erente pour chaque ligne, appel d'autres proc\'edures, validation par lots
+    \end{itemize}
+  \end{block}
+\end{frame}
+
+\begin{frame}[fragile]{Curseurs c\^ot\'e JDBC : lire un gros r\'esultat}
+  \begin{itemize}
+    \item Par d\'efaut, le pilote PostgreSQL \textbf{charge tout le r\'esultat en m\'emoire} avant le premier \texttt{next()}
+    \item Avec \texttt{setFetchSize(n)}, il utilise un curseur serveur et lit par paquets de $n$ lignes\ldots{}
+      \alert{seulement si l'autocommit est d\'esactiv\'e}
+  \end{itemize}
+\begin{lstlisting}[language=Java]
+c.setAutoCommit(false);                     // indispensable
+try (PreparedStatement ps = c.prepareStatement("SELECT id, txt FROM big")) {
+  ps.setFetchSize(1000);
+  try (ResultSet rs = ps.executeQuery()) { while (rs.next()) { ... } }
+}
+c.commit();
+\end{lstlisting}
+  \begin{datacard}
+    \small
+    \begin{tabular}{@{}lrr@{}}
+      \toprule
+      \textbf{2 millions de lignes, \texttt{fetchSize = 1000}} & \textbf{1\textsuperscript{re} ligne re\c{c}ue} & \textbf{m\'emoire} \\
+      \midrule
+      \texttt{autoCommit = true} (fetchSize ignor\'e) & 458 ms & tout le r\'esultat \\
+      \texttt{autoCommit = false} & \alert{1 ms} & un paquet \\
+      \bottomrule
+    \end{tabular}
+  \end{datacard}
+\end{frame}
+
+% ================================================================
+\section{Triggers : au-del\`a des bases}
+
+\begin{frame}{Les variantes de triggers}
+  \begin{datacard}
+    \small
+    \begin{tabular}{@{}p{2.6cm}p{5cm}p{5cm}@{}}
+      \toprule
+       & \textbf{\texttt{BEFORE}} & \textbf{\texttt{AFTER}} \\
+      \midrule
+      \texttt{FOR EACH ROW} & peut \textbf{modifier} \texttt{NEW} (valeur calcul\'ee) ou renvoyer \texttt{NULL} (ligne ignor\'ee) & voit la ligne finale ; valeur de retour ignor\'ee (audit, propagation) \\
+      \texttt{FOR EACH STATEMENT} & une fois par instruction, avant & une fois par instruction ; acc\`es \`a toutes les lignes via les \textbf{tables de transition} \\
+      \bottomrule
+    \end{tabular}
+  \end{datacard}
+  \vspace{2mm}
+  \begin{itemize}
+    \item Filtres : \texttt{UPDATE OF colonne} (seulement si cette colonne est cit\'ee), \texttt{WHEN (condition)} (\'evalu\'ee avant d'appeler la fonction)
+    \item Plusieurs triggers sur le m\^eme \'ev\'enement : ex\'ecut\'es par \textbf{ordre alphab\'etique} de nom
+    \item Variables disponibles : \texttt{TG\_OP} (\texttt{INSERT}/\texttt{UPDATE}/\texttt{DELETE}), \texttt{TG\_TABLE\_NAME}, \texttt{TG\_WHEN}\ldots
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{\texttt{BEFORE} : compl\'eter la ligne, avec filtres}
+\begin{lstlisting}[language=SQL]
+CREATE FUNCTION trg_horodater() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  NEW.maj := now();                  -- on modifie la ligne avant ecriture
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER compte_horodater
+  BEFORE UPDATE OF solde ON Compte
+  FOR EACH ROW
+  WHEN (OLD.solde IS DISTINCT FROM NEW.solde)
+  EXECUTE FUNCTION trg_horodater();
+\end{lstlisting}
+  \begin{itemize}
+    \item Test\'e : \texttt{SET solde = solde} (inchang\'e) et \texttt{SET type = type} (autre colonne) n'horodatent pas ;
+      \texttt{SET solde = solde + 1} horodate
+    \item \texttt{WHEN} \'evite m\^eme l'appel de la fonction : moins co\^uteux qu'un \texttt{IF} \`a l'int\'erieur
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Un trigger d'audit pour toutes les tables}
+\begin{lstlisting}[language=SQL,basicstyle=\lstcode\scriptsize]
+CREATE TABLE audit(id BIGSERIAL, quand TIMESTAMPTZ DEFAULT now(), utilisateur TEXT DEFAULT current_user,
+                   table_ TEXT, op TEXT, avant JSONB, apres JSONB);
+
+CREATE FUNCTION trg_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  INSERT INTO audit(table_, op, avant, apres) VALUES (TG_TABLE_NAME, TG_OP,
+    CASE WHEN TG_OP <> 'INSERT' THEN to_jsonb(OLD) END,
+    CASE WHEN TG_OP <> 'DELETE' THEN to_jsonb(NEW) END);
+  RETURN NULL;
+END $$;
+
+CREATE TRIGGER compte_audit AFTER INSERT OR UPDATE OR DELETE ON Compte
+  FOR EACH ROW EXECUTE FUNCTION trg_audit();
+CREATE TRIGGER client_audit AFTER INSERT OR UPDATE OR DELETE ON Client
+  FOR EACH ROW EXECUTE FUNCTION trg_audit();       -- meme fonction
+\end{lstlisting}
+  {\small Une seule fonction, r\'eutilis\'ee par toutes les tables, contre une fonction par table dans l'exercice 2 du TP6.
+  Garde l'\'etat avant/apr\`es, l'auteur et la date (AC24.02 : int\'egrit\'e et tra\c{c}abilit\'e).}
+\end{frame}
+
+\begin{frame}[fragile]{Niveau instruction et tables de transition}
+\begin{lstlisting}[language=SQL,basicstyle=\lstcode\scriptsize]
+CREATE FUNCTION trg_gros_volume() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE v_nb INT; v_total NUMERIC;
+BEGIN
+  SELECT count(*), sum(n.solde - o.solde) INTO v_nb, v_total
+    FROM nouveaux n JOIN anciens o USING (numCompte);      -- toutes les lignes modifiees
+  IF v_nb > 100 THEN
+    INSERT INTO alerte(nb, total) VALUES (v_nb, v_total);
+  END IF;
+  RETURN NULL;
+END $$;
+
+CREATE TRIGGER compte_volume AFTER UPDATE ON Compte
+  REFERENCING OLD TABLE AS anciens NEW TABLE AS nouveaux
+  FOR EACH STATEMENT EXECUTE FUNCTION trg_gros_volume();
+\end{lstlisting}
+  \begin{itemize}
+    \item Un seul appel pour un \texttt{UPDATE} de 10\,000 lignes, au lieu de 10\,000 avec \texttt{FOR EACH ROW}
+    \item Permet des contr\^oles globaux : volume, total d\'eplac\'e, coh\'erence entre lignes
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Les pi\`eges des triggers}
+  \begin{itemize}
+    \item \textbf{Annulation silencieuse} : un \texttt{BEFORE} qui renvoie \texttt{NULL} ignore la ligne sans erreur
+\begin{lstlisting}[style=out]
+DELETE FROM Compte WHERE numCompte = 9;   -- DELETE 0, aucune erreur pour l'application
+\end{lstlisting}
+      Pour refuser une op\'eration : \texttt{RAISE EXCEPTION}, que Java recevra
+    \item \textbf{Logique cach\'ee} : le d\'eveloppeur Java ne voit pas qu'un \texttt{UPDATE} \'ecrit dans trois autres tables ; documenter dans le README
+    \item \textbf{Cascades} : un trigger qui modifie une table qui a elle-m\^eme des triggers\ldots{}
+    \item \textbf{Co\^ut} : un trigger ligne par ligne s'ex\'ecute pour chaque ligne d'un \texttt{UPDATE} de masse
+    \item \textbf{JPA} : une colonne modifi\'ee par un trigger n'est pas vue par l'entit\'e en m\'emoire ;
+      relire avec \texttt{em.refresh(entite)}, ou d\'eclarer la colonne \texttt{@Generated} (Hibernate)
+  \end{itemize}
+\end{frame}
+
+% ================================================================
+\section{S\'ecuriser et industrialiser}
+
+\begin{frame}[fragile]{N'autoriser que les proc\'edures : \texttt{SECURITY DEFINER}}
+\begin{lstlisting}[language=SQL,basicstyle=\lstcode\scriptsize]
+CREATE ROLE appli LOGIN PASSWORD '...';          -- compte utilise par l'application Java
+GRANT SELECT ON Compte TO appli;                 -- lecture seule sur la table
+
+CREATE PROCEDURE debiter(p_num INT, p_m NUMERIC)
+LANGUAGE plpgsql
+SECURITY DEFINER                                 -- s'execute avec les droits du proprietaire
+SET search_path = public                         -- evite le detournement par un autre schema
+AS $$ BEGIN ... END $$;
+
+REVOKE EXECUTE ON PROCEDURE debiter(INT, NUMERIC) FROM PUBLIC;
+GRANT  EXECUTE ON PROCEDURE debiter(INT, NUMERIC) TO appli;
+\end{lstlisting}
+\begin{lstlisting}[style=out]
+appli=> UPDATE Compte SET solde = 0 WHERE numCompte = 1;   ERROR: permission denied for table compte
+appli=> CALL debiter(1, 10);                               CALL
+\end{lstlisting}
+  {\small M\^eme si l'application est compromise (injection SQL), elle ne peut modifier les soldes que par les r\`egles de la proc\'edure (AC24.02).}
+\end{frame}
+
+\begin{frame}[fragile]{SQL dynamique sans injection}
+\begin{lstlisting}[language=SQL]
+CREATE FUNCTION compter(p_table TEXT, p_type TEXT) RETURNS BIGINT LANGUAGE plpgsql AS $$
+DECLARE n BIGINT;
+BEGIN
+  EXECUTE format('SELECT count(*) FROM %I WHERE type = $1', p_table)   -- %I : identifiant
+     INTO n USING p_type;                                              -- $1 : valeur
+  RETURN n;
+END $$;
+\end{lstlisting}
+\begin{lstlisting}[style=out]
+SELECT compter('cpt; DROP TABLE cpt', 'x');
+ERROR:  relation "cpt; DROP TABLE cpt" does not exist
+\end{lstlisting}
+  \begin{itemize}
+    \item Jamais de concat\'enation \texttt{'... ' || p\_table || ' ...'} : c'est l'injection SQL du chapitre 1, c\^ot\'e serveur
+    \item \texttt{\%I} pour les noms de tables et colonnes, \texttt{USING} pour les valeurs (comme un \texttt{PreparedStatement})
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Versionner le code de la base}
+  \begin{itemize}
+    \item Le code PL/pgSQL est du code : il va dans le d\'ep\^ot Git, avec des scripts num\'erot\'es
+  \end{itemize}
+\begin{lstlisting}[language={}]
+src/main/resources/db/migration/
+  V1__schema.sql
+  V2__contraintes.sql
+  V3__procedure_virement.sql
+  V4__audit.sql
+\end{lstlisting}
+  \begin{itemize}
+    \item Un outil de migration (\textbf{Flyway}, Liquibase) applique au d\'emarrage les scripts pas encore pass\'es, dans l'ordre,
+      et garde l'historique dans une table ; avec Spring Boot, il suffit d'ajouter les d\'ependances \texttt{flyway-core} et \texttt{flyway-database-postgresql}
+    \item \texttt{CREATE OR REPLACE} pour faire \'evoluer une fonction sans la supprimer
+    \item Tester les proc\'edures : tests d'int\'egration Java contre une vraie base PostgreSQL (conteneur Docker)
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{\`A retenir}
+  \begin{itemize}
+    \item Contrainte d'abord, trigger ensuite, proc\'edure pour une op\'eration m\'etier nomm\'ee
+    \item Fonction = interrogeable en SQL, sans \texttt{COMMIT} ; proc\'edure = \texttt{CALL}, peut valider par lots (en autocommit c\^ot\'e JDBC)
+    \item Erreurs : \texttt{RAISE \ldots{} USING ERRCODE} c\^ot\'e base, \texttt{getSQLState()} c\^ot\'e Java ; un bloc \texttt{EXCEPTION} annule son contenu
+    \item Curseurs : pr\'ef\'erer une requ\^ete ensembliste ; c\^ot\'e JDBC, \texttt{setFetchSize} + autocommit d\'esactiv\'e
+    \item Triggers : \texttt{BEFORE} pour compl\'eter, \texttt{AFTER} pour tracer, niveau instruction pour les gros volumes ; jamais d'annulation silencieuse
+    \item S\'ecurit\'e : \texttt{SECURITY DEFINER} + \texttt{GRANT EXECUTE}, \texttt{format('\%I')} + \texttt{USING}
+  \end{itemize}
+\end{frame}
+
+\rquestionslide
+
+\end{document}
