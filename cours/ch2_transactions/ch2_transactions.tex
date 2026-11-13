@@ -39,13 +39,13 @@
       \end{exampleblock}
     \end{column}
     \begin{column}{0.48\textwidth}
-      \begin{exampleblock}{Exemple : virement}
+      \begin{exampleblock}{Exemple : commande en ligne}
         \begin{enumerate}
-          \item d\'ebiter le compte A
-          \item cr\'editer le compte B
+          \item retirer les articles du stock
+          \item cr\'eer la commande
           \item journaliser l'op\'eration
         \end{enumerate}
-        Une panne entre 1 et 2 ne doit pas faire \og dispara\^itre \fg{} d'argent.
+        Une panne entre 1 et 2 ne doit pas faire \og dispara\^itre \fg{} des articles du stock.
       \end{exampleblock}
     \end{column}
   \end{columns}
@@ -56,8 +56,8 @@
 try (Connection c = dataSource.getConnection()) {
   c.setAutoCommit(false);              // par defaut : autocommit apres CHAQUE requete
   try {
-    debiter(c, src, montant);
-    crediter(c, dst, montant);
+    retirerStock(c, produit, quantite);
+    creerCommande(c, client, produit, quantite);
     c.commit();                        // tout est valide
   } catch (SQLException e) {
     c.rollback();                      // rien n'est applique
@@ -68,6 +68,33 @@ try (Connection c = dataSource.getConnection()) {
   \begin{itemize}
     \item Toutes les requ\^etes d'une transaction utilisent la \alert{m\^eme} \texttt{Connection}
     \item Points de reprise partiels possibles : \texttt{Savepoint sp = c.setSavepoint(); \ldots{} c.rollback(sp);}
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{D'o\`u vient la \texttt{Connection} ?}
+  \begin{columns}[T]
+    \begin{column}{0.48\textwidth}
+      \textbf{En TP : \texttt{DriverManager}}
+\begin{lstlisting}[language=Java]
+Connection c = DriverManager
+  .getConnection(url, user, pwd);
+// nouvelle connexion physique
+\end{lstlisting}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \textbf{En production : un pool}
+\begin{lstlisting}[language=Java]
+Connection c = dataSource
+  .getConnection();   // empruntee
+c.close();            // rendue au pool
+\end{lstlisting}
+    \end{column}
+  \end{columns}
+  \vspace{2mm}
+  \begin{itemize}
+    \item Ouvrir une connexion co\^ute cher : un \textbf{pool} (ex. HikariCP) en garde quelques-unes pr\^etes
+    \item Le code transactionnel (\texttt{setAutoCommit}, \texttt{commit}, \texttt{rollback}) est \textbf{identique}
+    \item Les slides de ce chapitre \'ecrivent \texttt{dataSource.getConnection()} : en TP, utilisez votre \texttt{getConnection()}
   \end{itemize}
 \end{frame}
 
@@ -82,50 +109,76 @@ try (Connection c = dataSource.getConnection()) {
   \end{itemize}
   \vspace{2mm}
   \begin{alertblock}{Question}
-    Deux guichets d\'ebitent le m\^eme compte (1000\,\texteuro{}) au m\^eme instant : $-100$ et $-50$.
-    Quel est le solde final ? \only<2>{\alert{Pas forc\'ement 850\,\texteuro{}\ldots}}
+    Deux clients commandent le m\^eme article (stock : 10) au m\^eme instant : $-2$ et $-3$.
+    Quel est le stock final ? \only<2>{\alert{Pas forc\'ement 5\ldots}}
   \end{alertblock}
 \end{frame}
 
 \begin{frame}{L'anomalie la plus courante : la mise \`a jour perdue}
   \begin{center}
   \begin{tikzpicture}[node distance=0.25cm]
-    \node[font=\small\bfseries, text=qaaccent] (h1) at (0,0) {Transaction T1 (guichet 1)};
-    \node[font=\small\bfseries, text=qaaccent2] (h2) at (7,0) {Transaction T2 (guichet 2)};
-    \node[db] (hb) at (3.5,0) {solde en base};
-    \node[tx]  (a1) at (0,-0.8) {SELECT solde $\to$ 1000};
-    \node[db]  (b1) at (3.5,-0.8) {1000};
-    \node[txb] (c1) at (7,-1.5) {SELECT solde $\to$ 1000};
-    \node[db]  (b2) at (3.5,-1.5) {1000};
-    \node[txb] (c2) at (7,-2.2) {UPDATE solde = 1000-50};
+    \node[font=\small\bfseries, text=qaaccent] (h1) at (0,0) {Transaction T1 (client 1)};
+    \node[font=\small\bfseries, text=qaaccent2] (h2) at (7,0) {Transaction T2 (client 2)};
+    \node[db] (hb) at (3.5,0) {stock en base};
+    \node[tx]  (a1) at (0,-0.8) {SELECT stock $\to$ 10};
+    \node[db]  (b1) at (3.5,-0.8) {10};
+    \node[txb] (c1) at (7,-1.5) {SELECT stock $\to$ 10};
+    \node[db]  (b2) at (3.5,-1.5) {10};
+    \node[txb] (c2) at (7,-2.2) {UPDATE stock = 10-3};
     \node[txb] (c3) at (7,-2.9) {COMMIT};
-    \node[db]  (b3) at (3.5,-2.9) {950};
-    \node[tx]  (a2) at (0,-3.6) {UPDATE solde = 1000-100};
+    \node[db]  (b3) at (3.5,-2.9) {7};
+    \node[tx]  (a2) at (0,-3.6) {UPDATE stock = 10-2};
     \node[tx]  (a3) at (0,-4.3) {COMMIT};
-    \node[db, draw=qaaccent2, text=qaaccent2]  (b4) at (3.5,-4.3) {\textbf{900} (au lieu de 850)};
+    \node[db, draw=qaaccent2, text=qaaccent2]  (b4) at (3.5,-4.3) {\textbf{8} (au lieu de 5)};
     \draw[timeline] (-2.4,-0.4) -- node[left, font=\scriptsize, text=qamuted, rotate=90, anchor=south] {temps} (-2.4,-4.6);
   \end{tikzpicture}
   \end{center}
   \begin{itemize}
-    \item Chaque transaction calcule le nouveau solde \textbf{dans le code Java} \`a partir d'une valeur lue trop t\^ot
-    \item C'est le niveau d'isolation \textbf{par d\'efaut} de PostgreSQL (\texttt{READ COMMITTED}) : \alert{test\'e, r\'esultat 900}
+    \item Chaque transaction calcule le nouveau stock \textbf{dans le code Java} \`a partir d'une valeur lue trop t\^ot
+    \item C'est le niveau d'isolation \textbf{par d\'efaut} de PostgreSQL (\texttt{READ COMMITTED}) : \alert{test\'e, r\'esultat 8}
   \end{itemize}
 \end{frame}
 
-\begin{frame}{Les anomalies de lecture (norme SQL)}
+\begin{frame}{Les anomalies de concurrence}
   \begin{datacard}
     \small
-    \begin{tabular}{@{}p{3.2cm}p{9.2cm}@{}}
+    \begin{tabular}{@{}p{3.6cm}p{8.8cm}@{}}
       \toprule
       \textbf{Anomalie} & \textbf{Ce qui se passe} \\
       \midrule
-      Lecture sale & T1 lit une valeur modifi\'ee par T2 \textbf{non encore valid\'ee} ; T2 fait ensuite \texttt{ROLLBACK} \\
-      Lecture non r\'ep\'etable & T1 lit deux fois la m\^eme ligne et obtient deux valeurs diff\'erentes (T2 a valid\'e entre-temps) \\
-      Lecture fant\^ome & T1 relance une requ\^ete et voit des \textbf{lignes en plus ou en moins} (insertion/suppression de T2) \\
-      Mise \`a jour perdue & T1 et T2 lisent puis \'ecrivent la m\^eme ligne : l'\'ecriture de l'une \'ecrase celle de l'autre \\
+      Lecture sale\newline{\scriptsize\color{qamuted}\textit{dirty read} (P1)} & T1 lit une valeur modifi\'ee par T2 \textbf{non encore valid\'ee} ; T2 fait ensuite \texttt{ROLLBACK} \\
+      Lecture non r\'ep\'etable\newline{\scriptsize\color{qamuted}\textit{non-repeatable read} (P2)} & T1 lit deux fois la m\^eme ligne et obtient deux valeurs diff\'erentes (T2 a valid\'e entre-temps) \\
+      Lecture fant\^ome\newline{\scriptsize\color{qamuted}\textit{phantom read} (P3)} & T1 relance une requ\^ete et voit des \textbf{lignes en plus ou en moins} (insertion/suppression de T2) \\
+      Mise \`a jour perdue\newline{\scriptsize\color{qamuted}\textit{lost update} (P4)} & T1 et T2 lisent puis \'ecrivent la m\^eme ligne : l'\'ecriture de l'une \'ecrase celle de l'autre \\
       \bottomrule
     \end{tabular}
   \end{datacard}
+  \vspace{1mm}
+  \source{P1 \`a P3 : ph\'enom\`enes de la norme ANSI SQL-92. P4 : ajout\'e par Berenson et al. (SIGMOD 1995), absent de la norme.}
+\end{frame}
+
+\begin{frame}{Exemple : une lecture incoh\'erente (\textit{read skew})}
+  \begin{center}
+  \begin{tikzpicture}
+    \node[font=\small\bfseries, text=qaaccent] at (0,0) {T1 : transfert de 30 (A $\to$ B)};
+    \node[font=\small\bfseries, text=qaaccent2] at (7,0) {T2 : affiche A + B};
+    \node[db] at (3.5,0) {total en base : 100};
+    \node[tx]  at (0,-0.8) {UPDATE A = A - 30};
+    \node[db]  at (3.5,-0.8) {A = 60, B = 40};
+    \node[txb] at (7,-1.5) {SELECT A $\to$ 60};
+    \node[tx]  at (0,-2.2) {UPDATE B = B + 30};
+    \node[tx]  at (0,-2.9) {COMMIT};
+    \node[db]  at (3.5,-2.9) {A = 30, B = 70};
+    \node[txb] at (7,-3.6) {SELECT B $\to$ 70};
+    \node[db, draw=qaaccent2, text=qaaccent2] at (3.5,-4.3) {\textbf{130} (au lieu de 100)};
+    \node[font=\scriptsize, text=qaaccent2, anchor=west] at (5.2,-4.3) {$\leftarrow$ 60 + 70};
+    \draw[timeline] (-2.4,-0.4) -- node[left, font=\scriptsize, text=qamuted, rotate=90, anchor=south] {temps} (-2.4,-4.6);
+  \end{tikzpicture}
+  \end{center}
+  \begin{itemize}
+    \item A et B : deux entrep\^ots. PostgreSQL ne lit \textbf{jamais} une valeur non valid\'ee, mais deux \texttt{SELECT} s\'epar\'es peuvent voir \textbf{deux \'etats} de la base
+    \item Rem\`ede : \textbf{une seule requ\^ete} (\texttt{SELECT SUM(stock) \ldots{}}) ou \texttt{REPEATABLE READ}
+  \end{itemize}
 \end{frame}
 
 % ================================================================
@@ -147,7 +200,9 @@ try (Connection c = dataSource.getConnection()) {
   \end{datacard}
   \vspace{1mm}
   {\footnotesize\color{qamuted} $^{*}$ selon la norme. PostgreSQL est plus strict : \texttt{READ UNCOMMITTED} s'y comporte comme \texttt{READ COMMITTED}
-  (jamais de lecture sale), et \texttt{REPEATABLE READ} y emp\^eche aussi les fant\^omes.}
+  (jamais de lecture sale), et \texttt{REPEATABLE READ} y emp\^eche aussi les fant\^omes.
+  La colonne \og M\`aj perdue \fg{} n'est pas dans la norme (P4, Berenson et al. 1995).
+  Source : documentation PostgreSQL, \S13.2.}
   \begin{itemize}
     \item Plus le niveau est \'elev\'e, plus il y a de transactions \textbf{refus\'ees} ou \textbf{bloqu\'ees} : on paie l'isolation en d\'ebit
     \item PostgreSQL utilise le \textbf{MVCC} : chaque transaction lit une \og photo \fg{} (snapshot) de la base ; les lecteurs ne bloquent jamais les \'ecrivains
@@ -160,10 +215,10 @@ try (Connection c = dataSource.getConnection()) {
       \textbf{En SQL}
 \begin{lstlisting}[language=SQL]
 BEGIN ISOLATION LEVEL REPEATABLE READ;
-SELECT solde FROM Compte
- WHERE numCompte = 1;
-UPDATE Compte SET solde = 900
- WHERE numCompte = 1;
+SELECT stock FROM Produit
+ WHERE numProduit = 1;
+UPDATE Produit SET stock = 8
+ WHERE numProduit = 1;
 COMMIT;
 \end{lstlisting}
     \end{column}
@@ -179,9 +234,9 @@ c.commit();
     \end{column}
   \end{columns}
   \vspace{2mm}
-  \begin{block}{Ce qu'on a observ\'e sur PostgreSQL (sc\'enario du guichet)}
+  \begin{block}{Ce qu'on a observ\'e sur PostgreSQL (sc\'enario des deux clients)}
     \begin{itemize}
-      \item \texttt{READ COMMITTED} : solde final 900 \hfill \alert{mise \`a jour perdue}
+      \item \texttt{READ COMMITTED} : stock final 8 (au lieu de 5) \hfill \alert{mise \`a jour perdue}
       \item \texttt{REPEATABLE READ} : T1 re\c{c}oit \texttt{ERROR: could not serialize access due to concurrent update} \hfill SQLState \texttt{40001}
     \end{itemize}
     $\Rightarrow$ \`a un niveau \'elev\'e, l'application doit \textbf{rejouer} la transaction refus\'ee
@@ -194,32 +249,63 @@ c.commit();
 \begin{frame}[fragile]{Solution 1 : laisser la base faire le calcul}
 \begin{lstlisting}[language=Java]
 // NON : lecture, calcul en Java, puis ecriture (2 requetes, fenetre de concurrence)
-double solde = lireSolde(c, num);
-majSolde(c, num, solde - montant);
+int stock = lireStock(c, num);
+majStock(c, num, stock - quantite);
 
 // OUI : une seule requete, atomique pour la ligne concernee
 PreparedStatement ps = c.prepareStatement(
-  "UPDATE Compte SET solde = solde - ? WHERE numCompte = ? AND solde >= ?");
-ps.setBigDecimal(1, montant); ps.setInt(2, num); ps.setBigDecimal(3, montant);
-if (ps.executeUpdate() == 0) throw new SoldeInsuffisantException(num);
+  "UPDATE Produit SET stock = stock - ? WHERE numProduit = ? AND stock >= ?");
+ps.setInt(1, quantite); ps.setInt(2, num); ps.setInt(3, quantite);
+if (ps.executeUpdate() == 0) throw new StockInsuffisantException(num);
 \end{lstlisting}
   \begin{itemize}
-    \item La 2\textsuperscript{e} transaction attend le verrou de ligne, puis relit la valeur \`a jour : r\'esultat 850
-    \item La condition \texttt{solde >= ?} v\'erifie la r\`egle m\'etier \textbf{dans la m\^eme requ\^ete}
+    \item La 2\textsuperscript{e} transaction attend le verrou de ligne, puis relit la valeur \`a jour : r\'esultat 5
+    \item La condition \texttt{stock >= ?} v\'erifie la r\`egle m\'etier \textbf{dans la m\^eme requ\^ete}
     \item \`A privil\'egier d\`es que le calcul s'exprime en SQL
   \end{itemize}
+\end{frame}
+
+\begin{frame}{Les verrous : partag\'e (S) et exclusif (X)}
+  \begin{columns}[T]
+    \begin{column}{0.40\textwidth}
+      \begin{exampleblock}{Compatibilit\'e}
+        \centering\small
+        \begin{tabular}{@{}l|c|c@{}}
+          & \textbf{d\'ej\`a S} & \textbf{d\'ej\`a X} \\ \hline
+          \textbf{veut S} & \alert{ok} & attend \\
+          \textbf{veut X} & attend & attend
+        \end{tabular}
+      \end{exampleblock}
+    \end{column}
+    \begin{column}{0.56\textwidth}
+      \begin{exampleblock}{Dans PostgreSQL (par ligne)}
+        \small
+        \texttt{SELECT} simple : aucun verrou\\[0.4ex]
+        \texttt{FOR SHARE} : verrou S\\[0.4ex]
+        \texttt{UPDATE}, \texttt{DELETE}, \texttt{FOR UPDATE} : verrou X
+      \end{exampleblock}
+    \end{column}
+  \end{columns}
+  \vspace{2mm}
+  \begin{itemize}
+    \item Les lecteurs simples ne bloquent jamais les \'ecrivains (MVCC)
+    \item Verrouillage \`a deux phases \textbf{strict} : les verrous sont gard\'es jusqu'au \texttt{COMMIT} ou \texttt{ROLLBACK}
+    \item D'o\`u : transactions \textbf{courtes}, et toujours le \textbf{m\^eme ordre} de verrouillage
+  \end{itemize}
+  \vfill
+  \source{Source : documentation PostgreSQL, \S13.3 \og Explicit Locking \fg{} (verrous de ligne, interblocages).}
 \end{frame}
 
 \begin{frame}[fragile]{Solution 2 : verrou pessimiste (\texttt{SELECT \ldots{} FOR UPDATE})}
 \begin{lstlisting}[language=Java]
 c.setAutoCommit(false);
 PreparedStatement sel = c.prepareStatement(
-  "SELECT solde FROM Compte WHERE numCompte = ? FOR UPDATE");  // pose un verrou
+  "SELECT stock FROM Produit WHERE numProduit = ? FOR UPDATE");  // pose un verrou
 sel.setInt(1, num);
 ResultSet rs = sel.executeQuery(); rs.next();
-BigDecimal solde = rs.getBigDecimal("solde");
+int stock = rs.getInt("stock");
 // ... regles metier complexes en Java ...
-majSolde(c, num, solde.subtract(montant));
+majStock(c, num, stock - quantite);
 c.commit();                                                    // libere le verrou
 \end{lstlisting}
   \begin{itemize}
@@ -229,14 +315,41 @@ c.commit();                                                    // libere le verr
   \end{itemize}
 \end{frame}
 
+\begin{frame}{Avec \texttt{FOR UPDATE}, la 2\textsuperscript{e} transaction attend}
+  \begin{center}
+  \begin{tikzpicture}
+    \node[font=\small\bfseries, text=qaaccent] at (0,0) {T1 : commande 2 articles};
+    \node[font=\small\bfseries, text=qaaccent2] at (7,0) {T2 : commande 3 articles};
+    \node[db] at (3.5,0) {stock en base};
+    \node[tx]  at (0,-0.8) {SELECT \ldots{} FOR UPDATE $\to$ 10};
+    \node[db]  at (3.5,-0.8) {10};
+    \node[txb, dashed] at (7,-1.5) {SELECT \ldots{} FOR UPDATE};
+    \node[font=\scriptsize, text=qaaccent2] at (7,-1.95) {attend le verrou de T1};
+    \node[tx]  at (0,-2.5) {UPDATE stock = 10-2};
+    \node[tx]  at (0,-3.2) {COMMIT};
+    \node[db]  at (3.5,-3.2) {8};
+    \node[txb] at (7,-3.2) {verrou obtenu $\to$ 8};
+    \node[txb] at (7,-3.9) {UPDATE stock = 8-3};
+    \node[txb] at (7,-4.6) {COMMIT};
+    \node[db, draw=qaaccent2, text=qaaccent2] at (3.5,-4.6) {\textbf{5} (correct)};
+    \draw[timeline] (-2.4,-0.4) -- node[left, font=\scriptsize, text=qamuted, rotate=90, anchor=south] {temps} (-2.4,-4.9);
+  \end{tikzpicture}
+  \end{center}
+  \begin{itemize}\small
+    \item \texttt{READ COMMITTED} (d\'efaut) : T2 est \textbf{bloqu\'ee} jusqu'au \texttt{COMMIT} de T1, puis lit la valeur \textbf{\`a jour}
+    \item Prix \`a payer : les deux transactions s'ex\'ecutent l'une apr\`es l'autre
+    \item \texttt{REPEATABLE READ} : T2 recevrait plut\^ot l'erreur \texttt{40001}, \`a rejouer
+  \end{itemize}
+\end{frame}
+
 \begin{frame}[fragile]{Solution 3 : verrou optimiste (colonne de version)}
 \begin{lstlisting}[language=SQL]
-ALTER TABLE Compte ADD COLUMN version INT NOT NULL DEFAULT 0;
+ALTER TABLE Produit ADD COLUMN version INT NOT NULL DEFAULT 0;
 -- lecture : on memorise la version lue (ex. 7)
-SELECT solde, version FROM Compte WHERE numCompte = 1;
+SELECT stock, version FROM Produit WHERE numProduit = 1;
 -- ecriture : seulement si personne n'a modifie la ligne entre-temps
-UPDATE Compte SET solde = 900, version = version + 1
- WHERE numCompte = 1 AND version = 7;
+UPDATE Produit SET stock = 8, version = version + 1
+ WHERE numProduit = 1 AND version = 7;
 \end{lstlisting}
   \begin{itemize}
     \item 0 ligne modifi\'ee $\Rightarrow$ conflit : on pr\'evient l'utilisateur ou on rejoue
@@ -252,7 +365,7 @@ UPDATE Compte SET solde = 900, version = version + 1
       \toprule
       \textbf{Approche} & \textbf{Quand l'utiliser} & \textbf{Prix \`a payer} \\
       \midrule
-      Calcul en SQL & mise \`a jour simple (compteur, solde) & aucun \\
+      Calcul en SQL & mise \`a jour simple (compteur, stock) & aucun \\
       \texttt{FOR UPDATE} & logique complexe, conflits fr\'equents & attente, risque d'interblocage \\
       Version (optimiste) & conflits rares, interaction longue & g\'erer l'\'echec (message, rejeu) \\
       \texttt{REPEATABLE READ}/ \texttt{SERIALIZABLE} & r\`egles portant sur plusieurs lignes & rejouer sur SQLState \texttt{40001} \\
@@ -267,10 +380,10 @@ UPDATE Compte SET solde = 900, version = version + 1
 \begin{frame}{Interblocage (\textit{deadlock})}
   \begin{center}
   \begin{tikzpicture}
-    \node[tx]  (a1) at (0,0) {UPDATE compte 1};
-    \node[txb] (b1) at (6,-0.6) {UPDATE compte 2};
-    \node[tx]  (a2) at (0,-1.2) {UPDATE compte 2 \ldots{} attend T2};
-    \node[txb] (b2) at (6,-1.8) {UPDATE compte 1 \ldots{} attend T1};
+    \node[tx]  (a1) at (0,0) {UPDATE produit 1};
+    \node[txb] (b1) at (6,-0.6) {UPDATE produit 2};
+    \node[tx]  (a2) at (0,-1.2) {UPDATE produit 2 \ldots{} attend T2};
+    \node[txb] (b2) at (6,-1.8) {UPDATE produit 1 \ldots{} attend T1};
     \node[font=\small\bfseries, text=qaaccent] at (0,0.6) {T1};
     \node[font=\small\bfseries, text=qaaccent2] at (6,0.6) {T2};
     \draw[-Latex, thick, qaaccent2] (b2.west) -- (a1.east);
@@ -280,7 +393,7 @@ UPDATE Compte SET solde = 900, version = version + 1
   \begin{itemize}
     \item PostgreSQL d\'etecte le cycle (au bout d'une seconde) et \textbf{annule l'une des deux} :
       \texttt{ERROR: deadlock detected} \hfill SQLState \texttt{40P01}
-    \item Pr\'evention : toujours verrouiller dans le \textbf{m\^eme ordre} (ex. compte de plus petit num\'ero d'abord), transactions courtes
+    \item Pr\'evention : toujours verrouiller dans le \textbf{m\^eme ordre} (ex. produit de plus petit num\'ero d'abord), transactions courtes
     \item L'application traite \texttt{40P01} comme \texttt{40001} : on \textbf{rejoue} la transaction
   \end{itemize}
 \end{frame}
@@ -292,12 +405,13 @@ for (int essai = 1; ; essai++) {
     c.setAutoCommit(false);
     c.setTransactionIsolation(Connection.TRANSACTION_REPEATABLE_READ);
     try {
-      virer(c, src, dst, montant);
+      passerCommande(c, client, panier);
       c.commit();
       return;
     } catch (SQLException e) {
       c.rollback();
-      boolean rejouable = "40001".equals(e.getSQLState()) || "40P01".equals(e.getSQLState());
+      String etat = e.getSQLState();
+      boolean rejouable = "40001".equals(etat) || "40P01".equals(etat);
       if (!rejouable || essai == 3) throw e;
     }
   }
@@ -305,19 +419,99 @@ for (int essai = 1; ; essai++) {
 \end{lstlisting}
 \end{frame}
 
+% ================================================================
+\section{Contraintes, erreurs et bonnes pratiques}
+
+\begin{frame}[fragile]{Contraintes d\'eclaratives}
+\begin{lstlisting}[language=SQL,basicstyle=\lstcode\scriptsize]
+ALTER TABLE Etudiant ALTER COLUMN nom SET NOT NULL;
+ALTER TABLE Etudiant ADD CONSTRAINT chk_moy CHECK (moyenne BETWEEN 0 AND 20);
+ALTER TABLE Etudiant ADD CONSTRAINT uq_mail UNIQUE (email);
+ALTER TABLE Inscription ALTER COLUMN statut SET DEFAULT 'en attente';
+\end{lstlisting}
+  \begin{itemize}
+    \item \texttt{NOT NULL}, \texttt{CHECK}, \texttt{UNIQUE}, cl\'es primaires et \'etrang\`eres : la \textbf{base refuse} toute ligne qui les viole
+    \item \texttt{DEFAULT} n'interdit rien : il fournit la valeur utilis\'ee quand la colonne est omise \`a l'\texttt{INSERT}
+    \item \texttt{ALTER TABLE} modifie le sch\'ema sans le recr\'eer ; ajouter un \texttt{NOT NULL}, un \texttt{CHECK} ou un \texttt{UNIQUE} \'echoue si des lignes existantes violent d\'ej\`a la r\`egle
+    \item Relation plusieurs-\`a-plusieurs : \textbf{table d'association} (ex. \texttt{Inscription(numEtudiant, numCours)}) \`a cl\'e primaire composite
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Erreurs SQL : lire le \texttt{SQLState}}
+  \begin{datacard}
+    \footnotesize
+    \begin{tabular}{@{}p{1.8cm}p{6.2cm}p{2.6cm}@{}}
+      \toprule
+      \textbf{SQLState} & \textbf{Signification} & \textbf{R\'eaction} \\
+      \midrule
+      \texttt{23505} & doublon (cl\'e primaire, \texttt{UNIQUE}) & erreur m\'etier \\
+      \texttt{23503} & cl\'e \'etrang\`ere inexistante & erreur m\'etier \\
+      \texttt{23514} & \texttt{CHECK} viol\'e (ex. \texttt{moyenne > 20}) & erreur m\'etier \\
+      \texttt{40001} & \'echec de s\'erialisation & \textbf{rejouer} \\
+      \texttt{40P01} & interblocage d\'etect\'e & \textbf{rejouer} \\
+      \bottomrule
+    \end{tabular}
+  \end{datacard}
+\begin{lstlisting}[language=Java,basicstyle=\lstcode\scriptsize]
+catch (SQLException e) {
+  c.rollback();
+  if ("23505".equals(e.getSQLState()))
+    throw new EtudiantExistantException(num);
+  throw e;
+}
+\end{lstlisting}
+  \begin{itemize}
+    \item \texttt{PSQLException} n'a pas de sous-classe d\'edi\'ee : on lit \texttt{getSQLState()}
+  \end{itemize}
+  \source{Source : documentation PostgreSQL, annexe A \og PostgreSQL Error Codes \fg{} et \S13.5.}
+\end{frame}
+
 \begin{frame}{Bonnes pratiques}
   \begin{itemize}
     \item Des transactions \textbf{courtes} : pas d'appel r\'eseau, pas d'attente utilisateur \`a l'int\'erieur
     \item La fronti\`ere de transaction est dans la \textbf{couche service} (chapitre 5), pas dans chaque DAO
-    \item Pr\'ef\'erer les mises \`a jour \textbf{relatives} en SQL (\texttt{solde = solde - ?})
-    \item Faire v\'erifier les r\`egles par la base : \texttt{CHECK (solde >= 0)}, \texttt{UNIQUE}, cl\'es \'etrang\`eres
-    \item Montants : \texttt{NUMERIC} en SQL, \texttt{BigDecimal} en Java (jamais \texttt{REAL}/\texttt{double})
+    \item Pr\'ef\'erer les mises \`a jour \textbf{relatives} en SQL (\texttt{stock = stock - ?})
+    \item Faire v\'erifier les r\`egles par la base : \texttt{CHECK (stock >= 0)}, \texttt{UNIQUE}, cl\'es \'etrang\`eres
+    \item Montants : \texttt{NUMERIC} en SQL, \texttt{BigDecimal} en Java : \texttt{REAL}/\texttt{double} sont inexacts ($0{,}1 + 0{,}2 \neq 0{,}3$)
     \item Toujours \texttt{rollback()} en cas d'exception, et \texttt{close()} pour rendre la connexion au pool
   \end{itemize}
 \end{frame}
 
 % ================================================================
 \section{Exigences pour les rendus de TP}
+
+\begin{frame}[fragile]{Secrets : le fichier \texttt{.env}}
+  \begin{columns}[T]
+    \begin{column}{0.48\textwidth}
+      \textbf{.env} (\alert{jamais dans Git})
+\begin{lstlisting}[language={},basicstyle=\lstcode\scriptsize]
+POSTGRES_USER=app
+POSTGRES_PASSWORD=change-me
+POSTGRES_DB=campus_db
+DB_URL=jdbc:postgresql://db:5432/campus_db
+DB_USER=app
+DB_PASSWORD=change-me
+\end{lstlisting}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \textbf{Lecture c\^ot\'e Java}
+\begin{lstlisting}[language=Java,basicstyle=\lstcode\scriptsize]
+// conteneur : injecte par Docker
+System.getenv("DB_URL");
+// hors Docker : dotenv-java
+Dotenv.configure()
+  .ignoreIfMissing().load()
+  .get("DB_URL");
+\end{lstlisting}
+    \end{column}
+  \end{columns}
+  \vspace{2mm}
+  \begin{itemize}
+    \item \texttt{.env} dans \texttt{.gitignore} ; on versionne un \texttt{.env.example} sans secret
+    \item Docker Compose injecte \texttt{.env} dans le conteneur (\texttt{env\_file})
+    \item Hors Docker (IntelliJ) : l'h\^ote \texttt{db} devient \texttt{localhost}
+  \end{itemize}
+\end{frame}
 
 \begin{frame}{Un rendu de qualit\'e, c'est\ldots}
   \begin{columns}[T]
@@ -334,7 +528,7 @@ for (int essai = 1; ; essai++) {
     \begin{column}{0.48\textwidth}
       \begin{block}{README.md}
         \begin{itemize}
-          \item Comment lancer la base (\texttt{docker compose up -d})
+          \item Comment lancer la base (\texttt{cp .env.example .env}, puis \texttt{docker compose up -d})
           \item Comment compiler et ex\'ecuter (\texttt{mvn \ldots})
           \item Ce qui est fait, ce qui ne l'est pas
           \item Choix techniques et difficult\'es
@@ -346,6 +540,43 @@ for (int essai = 1; ; essai++) {
   \begin{alertblock}{Test d'acceptation}
     Un enseignant clone le d\'ep\^ot sur une machine vierge et suit le README : \textbf{\c{c}a doit fonctionner}.
   \end{alertblock}
+\end{frame}
+
+\begin{frame}{R\'ef\'erences (1/2) : articles et livre}
+  \footnotesize
+  \begin{itemize}\setlength{\itemsep}{1.2ex}
+    \item H. Berenson, P. Bernstein, J. Gray, J. Melton, E. O'Neil, P. O'Neil.
+      \textit{A Critique of ANSI SQL Isolation Levels}. ACM SIGMOD 1995, pp.~1--10.
+      \url{https://doi.org/10.1145/223784.223785}\\
+      {\color{qamuted}Phénom\`enes P1--P4, \textit{read skew}, \textit{snapshot isolation}.}
+    \item T. H\"arder, A. Reuter.
+      \textit{Principles of Transaction-Oriented Database Recovery}. ACM Computing Surveys 15(4), 1983, pp.~287--317.
+      \url{https://doi.org/10.1145/289.291}\\
+      {\color{qamuted}R\'ef\'erence classique sur les transactions et la reprise apr\`es panne.}
+    \item M. Kleppmann. \textit{Designing Data-Intensive Applications}. O'Reilly, 2017.
+      \url{https://dataintensive.net/}\\
+      {\color{qamuted}Chapitre 7 \og Transactions \fg{} : isolation, mises \`a jour perdues, \textit{write skew}.}
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{R\'ef\'erences (2/2) : documentation et outils}
+  \footnotesize
+  \begin{itemize}\setlength{\itemsep}{1.0ex}
+    \item PostgreSQL, chapitre 13 \og Concurrency Control \fg{} : \S13.2 \textit{Transaction Isolation},
+      \S13.3 \textit{Explicit Locking}, \S13.5 \textit{Serialization Failure Handling}\\
+      \url{https://www.postgresql.org/docs/current/transaction-iso.html}\\
+      \url{https://www.postgresql.org/docs/current/explicit-locking.html}\\
+      \url{https://www.postgresql.org/docs/current/mvcc-serialization-failure-handling.html}
+    \item PostgreSQL, annexe A \og PostgreSQL Error Codes \fg{} (SQLState)\\
+      \url{https://www.postgresql.org/docs/current/errcodes-appendix.html}
+    \item Oracle, \textit{The Java Tutorials} : \og Using Transactions \fg{} (JDBC)\\
+      \url{https://docs.oracle.com/javase/tutorial/jdbc/basics/transactions.html}
+    \item Pilote JDBC PostgreSQL : classe \texttt{PSQLException}\\
+      \url{https://jdbc.postgresql.org/documentation/publicapi/org/postgresql/util/PSQLException.html}
+    \item Outils : HikariCP \url{https://github.com/brettwooldridge/HikariCP} ;
+      dotenv-java \url{https://github.com/cdimascio/dotenv-java} ;
+      Docker Compose, \texttt{env\_file} \url{https://docs.docker.com/compose/how-tos/environment-variables/set-environment-variables/}
+  \end{itemize}
 \end{frame}
 
 \rquestionslide
